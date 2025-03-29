@@ -1,0 +1,20 @@
+# Игнорируем виртуальное окружение
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite3
+
+# Конфиденциальные данные
+.env
+
+# Логи
+logs/
+*.log
+
+# Кэш pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Docker файлы, которые не нужны в Git
+*.pid
