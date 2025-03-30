@@ -10,6 +10,9 @@ from handlers.start import start_router
 from handlers.checkin import checkin_router
 from handlers.profile import profile_router
 
+# Импортируем планировщик задач
+from scheduler import start_scheduler
+
 # Загружаем переменные окружения
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -32,6 +35,9 @@ dp.include_router(profile_router)
 async def main():
     logging.info("Инициализация базы данных...")
     init_db()  # Создаем таблицы перед запуском бота
+    
+    logging.info("Запуск планировщика задач...")
+    start_scheduler()  # Запускаем планировщик для автоматического разчекина
     
     logging.info("Запуск бота...")
     await dp.start_polling(bot)
