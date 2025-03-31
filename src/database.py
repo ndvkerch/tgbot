@@ -12,11 +12,24 @@ DB_PATH = "data/database.db"
 if not os.path.exists(DB_PATH):
     logging.warning(f"⚠️ Файл базы данных {DB_PATH} не найден!")
 
+# В начало database.py добавим создание таблицы users
 def init_db():
     """Создает таблицы в БД, если их нет."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
+            # Таблица users
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                first_name TEXT,
+                last_name TEXT,
+                username TEXT,
+                is_admin BOOLEAN NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            
+            # Таблица spots
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS spots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,6 +38,7 @@ def init_db():
                 longitude REAL NOT NULL
             )""")
             
+            # Таблица checkins
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS checkins (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,15 +46,52 @@ def init_db():
                 spot_id INTEGER NOT NULL,
                 timestamp TEXT NOT NULL,
                 active BOOLEAN NOT NULL DEFAULT 1,
-                checkin_type INTEGER NOT NULL,  -- 1: уже на месте, 2: планирует приехать
-                duration_hours REAL,           -- Длительность в часах (для типа 1)
-                arrival_time TEXT,             -- Время прибытия (для типа 2)
-                end_time TEXT                  -- Время окончания для автоматического разчекина
+                checkin_type INTEGER NOT NULL,
+                duration_hours REAL,
+                arrival_time TEXT,
+                end_time TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                FOREIGN KEY (spot_id) REFERENCES spots(id)
             )""")
             conn.commit()
             logging.info("✅ Таблицы успешно инициализированы.")
     except Exception as e:
         logging.error(f"❌ Ошибка при инициализации БД: {e}")
+
+# Добавим функции для работы с пользователями
+def add_or_update_user(user_id: int, first_name: str, last_name: str = None, username: str = None, is_admin: bool = False):
+    """Добавляет нового пользователя или обновляет существующего."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO users (user_id, first_name, last_name, username, is_admin, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (user_id, first_name, last_name, username, is_admin, datetime.utcnow().isoformat()))
+            conn.commit()
+            logging.info(f"✅ Пользователь {user_id} добавлен/обновлён")
+    except Exception as e:
+        logging.error(f"❌ Ошибка при добавлении пользователя: {e}")
+
+def get_user(user_id: int) -> dict:
+    """Получает информацию о пользователе по user_id."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_id, first_name, last_name, username, is_admin FROM users WHERE user_id = ?", (user_id,))
+            user = cursor.fetchone()
+            if user:
+                return {
+                    "user_id": user[0],
+                    "first_name": user[1],
+                    "last_name": user[2],
+                    "username": user[3],
+                    "is_admin": user[4]
+                }
+            return None
+    except Exception as e:
+        logging.error(f"❌ Ошибка при получении пользователя: {e}")
+        return None
 
 def get_spots():
     """Получает список всех спотов."""
@@ -202,31 +253,33 @@ def delete_spot(spot_id: int):
     except Exception as e:
         logging.error(f"❌ Ошибка при удалении спота: {e}")
 
-def get_checkins_for_spot(spot_id: int) -> tuple[int, list[str]]:
-    """Получает количество людей на месте и список времён прибытия для спота."""
+def get_checkins_for_spot(spot_id: int) -> tuple[int, list[dict], list[dict]]:
+    """Получает количество людей на месте и информацию о тех, кто планирует приехать."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             # Люди на месте (checkin_type=1, active=1)
             cursor.execute("""
-                SELECT COUNT(*) 
-                FROM checkins 
-                WHERE spot_id = ? AND checkin_type = 1 AND active = 1
+                SELECT u.first_name, u.username 
+                FROM checkins c
+                JOIN users u ON c.user_id = u.user_id
+                WHERE c.spot_id = ? AND c.checkin_type = 1 AND c.active = 1
             """, (spot_id,))
-            on_spot_count = cursor.fetchone()[0]
+            on_spot_users = [{"first_name": row[0], "username": row[1]} for row in cursor.fetchall()]
+            on_spot_count = len(on_spot_users)
 
             # Люди, планирующие приехать (checkin_type=2, active=1)
             cursor.execute("""
-                SELECT arrival_time 
-                FROM checkins 
-                WHERE spot_id = ? AND checkin_type = 2 AND active = 1
+                SELECT u.first_name, u.username, c.arrival_time 
+                FROM checkins c
+                JOIN users u ON c.user_id = u.user_id
+                WHERE c.spot_id = ? AND c.checkin_type = 2 AND c.active = 1
             """, (spot_id,))
-            arrival_times = [row[0] for row in cursor.fetchall()]
-            arrival_times = [
-                datetime.fromisoformat(time.replace("Z", "+00:00")).strftime("%H:%M")
-                for time in arrival_times
+            arriving_users = [
+                {"first_name": row[0], "username": row[1], "arrival_time": datetime.fromisoformat(row[2].replace("Z", "+00:00")).strftime("%H:%M")}
+                for row in cursor.fetchall()
             ]
-            return on_spot_count, arrival_times
+            return on_spot_count, on_spot_users, arriving_users
     except Exception as e:
         logging.error(f"❌ Ошибка при получении чек-инов для спота {spot_id}: {e}")
-        return 0, []
+        return 0, [], []

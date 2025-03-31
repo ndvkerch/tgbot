@@ -5,14 +5,14 @@ from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from database import get_spots, add_spot, checkin_user, get_active_checkin, get_spot_by_id, update_checkin_to_arrived, update_spot_name, update_spot_location, delete_spot, checkout_user
-from keyboards import main_keyboard
+from database import get_spots, add_spot, checkin_user, get_active_checkin, get_spot_by_id, update_checkin_to_arrived, update_spot_name, update_spot_location, delete_spot, checkout_user, get_user, add_or_update_user
+from keyboards import get_main_keyboard  # Импортируем динамическую клавиатуру
 
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 checkin_router = Router()
 
-ADMIN_ID = 987654321  # Убедитесь, что это ваш ID
-
+# Определение состояний для FSM
 class CheckinState(StatesGroup):
     choosing_spot = State()
     adding_spot = State()
@@ -25,14 +25,18 @@ class CheckinState(StatesGroup):
     setting_arrival_time = State()
     confirming_arrival = State()
 
+# Блок 1: Вспомогательные функции
 def is_admin(user_id: int) -> bool:
-    """Проверяем, является ли пользователь админом."""
-    result = user_id == ADMIN_ID
-    logging.info(f"Проверка: пользователь {user_id} является админом? {result}")
-    return result
+    """Проверяет, является ли пользователь админом."""
+    user = get_user(user_id)
+    if user:
+        result = user["is_admin"]
+        logging.info(f"Проверка: пользователь {user_id} является админом? {result}")
+        return result
+    return False
 
 def create_spot_keyboard(spots: list, is_admin: bool) -> InlineKeyboardMarkup:
-    """Создаём клавиатуру со списком спотов, с доп. кнопками для админа."""
+    """Создаёт клавиатуру со списком спотов, с дополнительными кнопками для админа."""
     keyboard = []
     for spot in spots:
         spot_buttons = [InlineKeyboardButton(text=spot["name"], callback_data=f"spot_{spot['id']}")]
@@ -44,7 +48,7 @@ def create_spot_keyboard(spots: list, is_admin: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def create_checkin_type_keyboard() -> InlineKeyboardMarkup:
-    """Создаём клавиатуру для выбора типа чек-ина."""
+    """Создаёт клавиатуру для выбора типа чек-ина."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Я уже на споте", callback_data="checkin_type_1")],
         [InlineKeyboardButton(text="Планирую приехать", callback_data="checkin_type_2")],
@@ -53,7 +57,7 @@ def create_checkin_type_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 def create_duration_keyboard() -> InlineKeyboardMarkup:
-    """Создаём клавиатуру для выбора длительности пребывания."""
+    """Создаёт клавиатуру для выбора длительности пребывания."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="1 час", callback_data="duration_1"),
          InlineKeyboardButton(text="2 часа", callback_data="duration_2"),
@@ -66,7 +70,7 @@ def create_duration_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 def create_arrival_time_keyboard() -> InlineKeyboardMarkup:
-    """Создаём клавиатуру для выбора времени прибытия."""
+    """Создаёт клавиатуру для выбора времени прибытия."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Через 1 час", callback_data="arrival_1"),
          InlineKeyboardButton(text="Через 2 часа", callback_data="arrival_2"),
@@ -78,14 +82,26 @@ def create_arrival_time_keyboard() -> InlineKeyboardMarkup:
     ])
     return keyboard
 
+# Блок 2: Обработчики для процесса чек-ина
 @checkin_router.callback_query(F.data == "checkin")
 async def process_checkin(callback: types.CallbackQuery, state: FSMContext):
     """Выбор существующего спота или добавление нового."""
-    logging.info(f"Пользователь {callback.from_user.id} нажал на Чек-ин (callback)")
+    user_id = callback.from_user.id
+    user = get_user(user_id)
+    if not user:
+        # Регистрируем пользователя
+        add_or_update_user(
+            user_id=user_id,
+            first_name=callback.from_user.first_name,
+            last_name=callback.from_user.last_name,
+            username=callback.from_user.username
+        )
+    
+    logging.info(f"Пользователь {user_id} нажал на Чек-ин (callback)")
     spots = get_spots() or []
 
     if spots:
-        keyboard = create_spot_keyboard(spots, is_admin(callback.from_user.id))
+        keyboard = create_spot_keyboard(spots, is_admin(user_id))
         await callback.message.answer("Выберите спот для чекаина:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
@@ -154,8 +170,10 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("\u2705 Вы зачекинились! 🌊")
     await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
     
+    # Динамическая клавиатура после чек-ина
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🚪 Разчекиниться", callback_data="uncheckin")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
@@ -190,6 +208,7 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext)
     await callback.message.edit_text(f"\u2705 Вы запланировали приезд на спот '{spot['name']}'! 🌊")
     await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
     
+    # Динамическая клавиатура после планирования приезда
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Я приехал!", callback_data="confirm_arrival")],
@@ -250,8 +269,10 @@ async def process_arrival_duration(callback: types.CallbackQuery, state: FSMCont
     await callback.message.edit_text("\u2705 Вы подтвердили прибытие и зачекинились! 🌊")
     await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
     
+    # Динамическая клавиатура после подтверждения прибытия
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🚪 Разчекиниться", callback_data="uncheckin")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
@@ -263,8 +284,9 @@ async def process_arrival_duration(callback: types.CallbackQuery, state: FSMCont
 async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
     """Отмена чек-ина, возвращение к выбору спота."""
     spots = get_spots() or []
+    user_id = callback.from_user.id
     if spots:
-        keyboard = create_spot_keyboard(spots, is_admin(callback.from_user.id))
+        keyboard = create_spot_keyboard(spots, is_admin(user_id))
         await callback.message.edit_text("Выберите спот для чекаина:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
@@ -278,10 +300,12 @@ async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(CheckinState.adding_spot)
     await callback.answer()
 
+# Блок 3: Обработчики для редактирования и удаления спотов (для админов)
 @checkin_router.callback_query(F.data.startswith("edit_spot_"))
 async def edit_spot(callback: types.CallbackQuery, state: FSMContext):
     """Начало редактирования спота (только для админа): сначала геопозиция."""
-    if not is_admin(callback.from_user.id):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
         await callback.answer("❌ У вас нет прав для редактирования спотов.", show_alert=True)
         return
 
@@ -358,7 +382,8 @@ async def handle_invalid_new_spot_name(message: types.Message, state: FSMContext
 @checkin_router.callback_query(F.data.startswith("delete_spot_"))
 async def confirm_delete_spot(callback: types.CallbackQuery, state: FSMContext):
     """Запрашиваем подтверждение удаления спота (только для админа)."""
-    if not is_admin(callback.from_user.id):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
         await callback.answer("❌ У вас нет прав для удаления спотов.", show_alert=True)
         return
 
@@ -378,13 +403,14 @@ async def confirm_delete_spot(callback: types.CallbackQuery, state: FSMContext):
 @checkin_router.callback_query(F.data.startswith("confirm_delete_"))
 async def delete_spot_handler(callback: types.CallbackQuery, state: FSMContext):
     """Удаление спота после подтверждения."""
-    if not is_admin(callback.from_user.id):
+    user_id = callback.from_user.id
+    if not is_admin(user_id):
         await callback.answer("❌ У вас нет прав для удаления спотов.", show_alert=True)
         return
 
     spot_id = int(callback.data.split("_")[2])
     delete_spot(spot_id)
-    logging.info(f"Админ {callback.from_user.id} удалил спот ID {spot_id}")
+    logging.info(f"Админ {user_id} удалил спот ID {spot_id}")
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -398,9 +424,10 @@ async def delete_spot_handler(callback: types.CallbackQuery, state: FSMContext):
 @checkin_router.callback_query(F.data == "cancel_delete")
 async def cancel_delete_spot(callback: types.CallbackQuery, state: FSMContext):
     """Отмена удаления спота."""
+    user_id = callback.from_user.id
     spots = get_spots() or []
     if spots:
-        keyboard = create_spot_keyboard(spots, is_admin(callback.from_user.id))
+        keyboard = create_spot_keyboard(spots, is_admin(user_id))
         await callback.message.edit_text("Выберите спот для чекаина:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
@@ -414,10 +441,12 @@ async def cancel_delete_spot(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(CheckinState.adding_spot)
     await callback.answer()
 
+# Блок 4: Обработчики для добавления нового спота
 @checkin_router.callback_query(F.data == "add_spot")
 async def request_location(callback: types.CallbackQuery, state: FSMContext):
     """Просим отправить геолокацию для создания спота."""
-    logging.info(f"Пользователь {callback.from_user.id} выбрал добавить новый спот")
+    user_id = callback.from_user.id
+    logging.info(f"Пользователь {user_id} выбрал добавить новый спот")
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📍 Отправить геолокацию", request_location=True)]],
         resize_keyboard=True,
@@ -432,7 +461,8 @@ async def request_location(callback: types.CallbackQuery, state: FSMContext):
 async def process_location(message: types.Message, state: FSMContext):
     """Обрабатываем геолокацию и просим ввести название спота."""
     lat, lon = message.location.latitude, message.location.longitude
-    logging.info(f"Пользователь {message.from_user.id} отправил геолокацию: {lat}, {lon}")
+    user_id = message.from_user.id
+    logging.info(f"Пользователь {user_id} отправил геолокацию: {lat}, {lon}")
     await state.update_data(lat=lat, lon=lon)
     await message.answer("📍 Геолокация получена! Теперь введите название спота:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(CheckinState.naming_spot)
@@ -458,13 +488,15 @@ async def add_new_spot_handler(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     lat, lon = data["lat"], data["lon"]
-    logging.info(f"Пользователь {message.from_user.id} создаёт спот '{spot_name}' с координатами: {lat}, {lon}")
+    user_id = message.from_user.id
+    logging.info(f"Пользователь {user_id} создаёт спот '{spot_name}' с координатами: {lat}, {lon}")
     
     spot_id = add_spot(spot_name, lat, lon)
-    checkin_user(message.from_user.id, spot_id, checkin_type=1, duration_hours=1)  # По умолчанию 1 час
+    checkin_user(user_id, spot_id, checkin_type=1, duration_hours=1)  # По умолчанию 1 час
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🚪 Разчекиниться", callback_data="uncheckin")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
@@ -476,11 +508,13 @@ async def handle_invalid_spot_name(message: types.Message, state: FSMContext):
     """Обрабатываем случай, если пользователь отправил не текст."""
     await message.answer("❌ Пожалуйста, введите название спота текстом.")
 
+# Блок 5: Обработчики для навигации и разчекина
 @checkin_router.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
     """Возвращаемся в главное меню."""
+    user_id = callback.from_user.id
     await callback.message.delete()
-    await callback.message.answer("Вы вернулись в главное меню.", reply_markup=main_keyboard)
+    await callback.message.answer("Вы вернулись в главное меню.", reply_markup=get_main_keyboard(user_id))
     await state.clear()
     await callback.answer()
 
@@ -511,6 +545,6 @@ async def process_uncheckin(callback: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
-    await callback.message.answer("Вернитесь в меню:", reply_markup=keyboard)
+    await callback.message.answer("Вернитесь в меню:", reply_markup=get_main_keyboard(user_id))
     await state.clear()
     await callback.answer()

@@ -1,6 +1,7 @@
 from aiogram import Router, types
 from aiogram.filters import Command
-from keyboards import main_keyboard  # Импортируем клавиатуру
+from keyboards import get_main_keyboard  # Импортируем динамическую клавиатуру
+from database import get_user, add_or_update_user  # Импортируем функции для работы с пользователями
 
 start_router = Router()
 
@@ -8,6 +9,17 @@ start_router = Router()
 async def start_command(message: types.Message):
     # Удаляем старую клавиатуру (если была) и отправляем приветственное сообщение
     await message.answer("⏳ Обновляем клавиатуру...", reply_markup=types.ReplyKeyboardRemove())
+
+    # Регистрируем пользователя, если он ещё не в базе
+    user_id = message.from_user.id
+    user = get_user(user_id)
+    if not user:
+        add_or_update_user(
+            user_id=user_id,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name,
+            username=message.from_user.username
+        )
 
     # Формируем текст приветственного сообщения
     welcome_text = (
@@ -21,5 +33,5 @@ async def start_command(message: types.Message):
         "📲 Выбирай команду ниже или напиши мне!"
     ).format(name=message.from_user.full_name)
 
-    # Отправляем сообщение с клавиатурой
-    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=main_keyboard)
+    # Отправляем сообщение с динамической клавиатурой
+    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))

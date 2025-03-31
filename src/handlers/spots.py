@@ -67,13 +67,14 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     # Формируем ответ
     response = "🔍 Ближайшие споты:\n\n"
     for spot, distance in nearest_spots:
-        on_spot_count, arrival_times = get_checkins_for_spot(spot["id"])
-        arrival_info = ", ".join(arrival_times) if arrival_times else "нет"
+        on_spot_count, on_spot_users, arriving_users = get_checkins_for_spot(spot["id"])
+        on_spot_names = ", ".join(user["first_name"] for user in on_spot_users) if on_spot_users else "никого"
+        arriving_info = ", ".join(f"{user['first_name']} ({user['arrival_time']})" for user in arriving_users) if arriving_users else "нет"
         response += (
             f"Спот: {spot['name']}\n"
             f"Расстояние: {distance:.2f} км\n"
-            f"На месте: {on_spot_count} чел.\n"
-            f"Приедут: {len(arrival_times)} чел. ({arrival_info})\n\n"
+            f"На месте: {on_spot_count} чел. ({on_spot_names})\n"
+            f"Приедут: {len(arriving_users)} чел. ({arriving_info})\n\n"
         )
 
     await message.answer(response, reply_markup=ReplyKeyboardRemove())
