@@ -54,7 +54,7 @@ async def main():
     init_db()  # Создаём таблицы перед запуском бота
     
     logging.info("Запуск планировщика задач...")
-    start_scheduler()  # Запускаем планировщик для автоматического разчекина
+    start_scheduler(bot=bot)  # Запускаем планировщик для автоматического разчекина
     
     logging.info("Запуск бота...")
     await dp.start_polling(bot)
