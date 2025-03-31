@@ -202,5 +202,31 @@ def delete_spot(spot_id: int):
     except Exception as e:
         logging.error(f"❌ Ошибка при удалении спота: {e}")
 
-# Инициализация БД при запуске
-init_db()
+def get_checkins_for_spot(spot_id: int) -> tuple[int, list[str]]:
+    """Получает количество людей на месте и список времён прибытия для спота."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            # Люди на месте (checkin_type=1, active=1)
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM checkins 
+                WHERE spot_id = ? AND checkin_type = 1 AND active = 1
+            """, (spot_id,))
+            on_spot_count = cursor.fetchone()[0]
+
+            # Люди, планирующие приехать (checkin_type=2, active=1)
+            cursor.execute("""
+                SELECT arrival_time 
+                FROM checkins 
+                WHERE spot_id = ? AND checkin_type = 2 AND active = 1
+            """, (spot_id,))
+            arrival_times = [row[0] for row in cursor.fetchall()]
+            arrival_times = [
+                datetime.fromisoformat(time.replace("Z", "+00:00")).strftime("%H:%M")
+                for time in arrival_times
+            ]
+            return on_spot_count, arrival_times
+    except Exception as e:
+        logging.error(f"❌ Ошибка при получении чек-инов для спота {spot_id}: {e}")
+        return 0, []

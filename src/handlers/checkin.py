@@ -483,3 +483,34 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Вы вернулись в главное меню.", reply_markup=main_keyboard)
     await state.clear()
     await callback.answer()
+
+@checkin_router.callback_query(F.data == "uncheckin")
+async def process_uncheckin(callback: types.CallbackQuery, state: FSMContext):
+    """Обрабатываем разчекин пользователя."""
+    user_id = callback.from_user.id
+    active_checkin = get_active_checkin(user_id)
+    
+    if not active_checkin:
+        await callback.message.edit_text("❌ У вас нет активных чек-инов.")
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
+            ]
+        )
+        await callback.message.answer("Вернитесь в меню:", reply_markup=keyboard)
+        await callback.answer()
+        return
+
+    # Разчекиниваем пользователя
+    checkout_user(active_checkin["id"])
+    spot = get_spot_by_id(active_checkin["spot_id"])
+    await callback.message.edit_text(f"\u2705 Вы успешно разчекинились со спота '{spot['name']}'! 🚪")
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
+        ]
+    )
+    await callback.message.answer("Вернитесь в меню:", reply_markup=keyboard)
+    await state.clear()
+    await callback.answer()

@@ -9,6 +9,7 @@ from database import init_db
 from handlers.start import start_router
 from handlers.checkin import checkin_router
 from handlers.profile import profile_router
+from handlers.spots import spots_router
 
 # Импортируем планировщик задач
 from scheduler import start_scheduler
@@ -31,6 +32,7 @@ dp = Dispatcher()
 dp.include_router(start_router)
 dp.include_router(checkin_router)
 dp.include_router(profile_router)
+dp.include_router(spots_router)
 
 async def main():
     logging.info("Инициализация базы данных...")
