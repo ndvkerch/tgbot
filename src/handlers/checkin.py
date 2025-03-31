@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 
-from aiogram import Router, types, F
+from aiogram import Bot, Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -145,7 +145,7 @@ async def checkin_type_2(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @checkin_router.callback_query(F.data.startswith("duration_"))
-async def process_duration(callback: types.CallbackQuery, state: FSMContext):
+async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     """Обрабатываем длительность пребывания и выполняем чек-ин."""
     duration_str = callback.data.split("_")[1]
     duration_hours = float(duration_str) if duration_str in ["1", "2", "3"] else None
@@ -163,7 +163,7 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
 
     # Выполняем чек-ин
-    checkin_user(user_id, spot_id, checkin_type=1, duration_hours=duration_hours)
+    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=duration_hours)
     
     # Получаем информацию о споте для отображения на карте
     spot = get_spot_by_id(spot_id)
@@ -182,7 +182,7 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @checkin_router.callback_query(F.data.startswith("arrival_"))
-async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext):
+async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     """Обрабатываем время прибытия и выполняем чек-ин."""
     arrival_str = callback.data.split("_")[1]
     now = datetime.utcnow()
@@ -201,7 +201,7 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext)
     user_id = callback.from_user.id
 
     # Выполняем чек-ин
-    checkin_user(user_id, spot_id, checkin_type=2, arrival_time=arrival_time)
+    await checkin_user(user_id, spot_id, checkin_type=2, bot=bot, arrival_time=arrival_time)
     
     # Получаем информацию о споте для отображения на карте
     spot = get_spot_by_id(spot_id)
@@ -244,7 +244,7 @@ async def confirm_arrival(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @checkin_router.callback_query(F.data.startswith("duration_"), CheckinState.confirming_arrival)
-async def process_arrival_duration(callback: types.CallbackQuery, state: FSMContext):
+async def process_arrival_duration(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     """Обрабатываем длительность после подтверждения прибытия."""
     duration_str = callback.data.split("_")[1]
     duration_hours = float(duration_str) if duration_str in ["1", "2", "3"] else None
@@ -479,7 +479,7 @@ async def handle_invalid_location(message: types.Message, state: FSMContext):
     await message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
 
 @checkin_router.message(CheckinState.naming_spot, F.text)
-async def add_new_spot_handler(message: types.Message, state: FSMContext):
+async def add_new_spot_handler(message: types.Message, state: FSMContext, bot: Bot):
     """Создаём новый спот с введённым названием и чекиним пользователя."""
     spot_name = message.text.strip()
     if not spot_name:
@@ -492,7 +492,7 @@ async def add_new_spot_handler(message: types.Message, state: FSMContext):
     logging.info(f"Пользователь {user_id} создаёт спот '{spot_name}' с координатами: {lat}, {lon}")
     
     spot_id = add_spot(spot_name, lat, lon)
-    checkin_user(user_id, spot_id, checkin_type=1, duration_hours=1)  # По умолчанию 1 час
+    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=1)  # По умолчанию 1 час
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
