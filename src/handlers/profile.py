@@ -17,10 +17,10 @@ class ProfileState(StatesGroup):
     managing_favorites = State()
 
 # Блок 1: Вспомогательные функции
-def create_favorite_spots_keyboard(user_id: int, spots: list) -> InlineKeyboardMarkup:
+async def create_favorite_spots_keyboard(user_id: int, spots: list) -> InlineKeyboardMarkup:
     """Создаёт клавиатуру со списком спотов для управления избранным."""
     keyboard = []
-    favorite_spots = get_favorite_spots(user_id)
+    favorite_spots = await get_favorite_spots(user_id)  # Добавляем await для асинхронного вызова
     favorite_spot_ids = {spot["spot_id"] for spot in favorite_spots}
 
     for spot in spots:
@@ -40,24 +40,24 @@ def create_favorite_spots_keyboard(user_id: int, spots: list) -> InlineKeyboardM
 async def show_profile(callback: types.CallbackQuery, state: FSMContext):
     """Показывает профиль пользователя с его статистикой, активным спотом и опцией управления избранным."""
     user_id = callback.from_user.id
-    user = get_user(user_id)
+    user = await get_user(user_id)  # Добавляем await
     if not user:
         await callback.message.answer("❌ Пользователь не найден. Попробуйте перезапустить бота с помощью /start.")
         await callback.answer()
         return
 
     # Получаем статистику чек-инов
-    checkins = get_checkins_for_user(user_id)
+    checkins = await get_checkins_for_user(user_id)  # Добавляем await
     total_time_hours = 0
     for checkin in checkins:
         if checkin["duration_hours"]:
             total_time_hours += checkin["duration_hours"]
 
     # Получаем текущий активный спот
-    active_checkin = get_active_checkin(user_id)
+    active_checkin = await get_active_checkin(user_id)  # Добавляем await
     active_spot_text = "Нет активного чек-ина."
     if active_checkin:
-        spot = get_spot_by_id(active_checkin["spot_id"])
+        spot = await get_spot_by_id(active_checkin["spot_id"])  # Добавляем await
         active_spot_text = f"Вы сейчас на споте: {spot['name']}"
 
     # Формируем текст профиля
@@ -83,7 +83,7 @@ async def show_profile(callback: types.CallbackQuery, state: FSMContext):
 async def manage_favorite_spots(callback: types.CallbackQuery, state: FSMContext):
     """Показывает список спотов для управления избранным."""
     user_id = callback.from_user.id
-    spots = get_spots() or []
+    spots = await get_spots() or []  # Добавляем await
 
     if not spots:
         await callback.message.edit_text("❌ В базе нет спотов для добавления в избранное.")
@@ -97,7 +97,7 @@ async def manage_favorite_spots(callback: types.CallbackQuery, state: FSMContext
         await callback.answer()
         return
 
-    keyboard = create_favorite_spots_keyboard(user_id, spots)
+    keyboard = await create_favorite_spots_keyboard(user_id, spots)  # Добавляем await
     await callback.message.edit_text("Выберите спот для управления избранным:", reply_markup=keyboard)
     await state.set_state(ProfileState.managing_favorites)
     await callback.answer()
@@ -107,11 +107,11 @@ async def add_favorite_spot_handler(callback: types.CallbackQuery, state: FSMCon
     """Добавляет спот в избранное."""
     user_id = callback.from_user.id
     spot_id = int(callback.data.split("_")[2])
-    add_favorite_spot(user_id, spot_id)
+    await add_favorite_spot(user_id, spot_id)  # Добавляем await
     logging.info(f"Пользователь {user_id} добавил спот ID {spot_id} в избранное")
 
-    spots = get_spots() or []
-    keyboard = create_favorite_spots_keyboard(user_id, spots)
+    spots = await get_spots() or []  # Добавляем await
+    keyboard = await create_favorite_spots_keyboard(user_id, spots)  # Добавляем await
     await callback.message.edit_text("Спот добавлен в избранное! Выберите другой спот или вернитесь в профиль:", reply_markup=keyboard)
     await callback.answer()
 
@@ -120,11 +120,11 @@ async def remove_favorite_spot_handler(callback: types.CallbackQuery, state: FSM
     """Удаляет спот из избранного."""
     user_id = callback.from_user.id
     spot_id = int(callback.data.split("_")[2])
-    remove_favorite_spot(user_id, spot_id)
+    await remove_favorite_spot(user_id, spot_id)  # Добавляем await
     logging.info(f"Пользователь {user_id} удалил спот ID {spot_id} из избранного")
 
-    spots = get_spots() or []
-    keyboard = create_favorite_spots_keyboard(user_id, spots)
+    spots = await get_spots() or []  # Добавляем await
+    keyboard = await create_favorite_spots_keyboard(user_id, spots)  # Добавляем await
     await callback.message.edit_text("Спот удалён из избранного! Выберите другой спот или вернитесь в профиль:", reply_markup=keyboard)
     await callback.answer()
 
@@ -132,24 +132,24 @@ async def remove_favorite_spot_handler(callback: types.CallbackQuery, state: FSM
 async def back_to_profile(callback: types.CallbackQuery, state: FSMContext):
     """Возвращает пользователя в профиль из управления избранным."""
     user_id = callback.from_user.id
-    user = get_user(user_id)
+    user = await get_user(user_id)  # Добавляем await
     if not user:
         await callback.message.answer("❌ Пользователь не найден. Попробуйте перезапустить бота с помощью /start.")
         await callback.answer()
         return
 
     # Получаем статистику чек-инов
-    checkins = get_checkins_for_user(user_id)
+    checkins = await get_checkins_for_user(user_id)  # Добавляем await
     total_time_hours = 0
     for checkin in checkins:
         if checkin["duration_hours"]:
             total_time_hours += checkin["duration_hours"]
 
     # Получаем текущий активный спот
-    active_checkin = get_active_checkin(user_id)
+    active_checkin = await get_active_checkin(user_id)  # Добавляем await
     active_spot_text = "Нет активного чек-ина."
     if active_checkin:
-        spot = get_spot_by_id(active_checkin["spot_id"])
+        spot = await get_spot_by_id(active_checkin["spot_id"])  # Добавляем await
         active_spot_text = f"Вы сейчас на споте: {spot['name']}"
 
     # Формируем текст профиля

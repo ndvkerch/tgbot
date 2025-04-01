@@ -43,7 +43,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     """Обрабатываем геолокацию и показываем 5 ближайших спотов."""
     user_lat = message.location.latitude
     user_lon = message.location.longitude
-    spots = get_spots() or []
+    spots = await get_spots() or []  # Добавили await
 
     if not spots:
         await message.answer("❌ Похоже, в базе нет спотов.", reply_markup=ReplyKeyboardRemove())
@@ -67,7 +67,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     # Формируем ответ
     response = "🔍 Ближайшие споты:\n\n"
     for spot, distance in nearest_spots:
-        on_spot_count, on_spot_users, arriving_users = get_checkins_for_spot(spot["id"])
+        on_spot_count, on_spot_users, arriving_users = await get_checkins_for_spot(spot["id"])  # Добавили await
         on_spot_names = ", ".join(user["first_name"] for user in on_spot_users) if on_spot_users else "никого"
         arriving_info = ", ".join(f"{user['first_name']} ({user['arrival_time']})" for user in arriving_users) if arriving_users else "нет"
         response += (

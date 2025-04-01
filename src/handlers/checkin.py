@@ -26,9 +26,9 @@ class CheckinState(StatesGroup):
     confirming_arrival = State()
 
 # Блок 1: Вспомогательные функции
-def is_admin(user_id: int) -> bool:
+async def is_admin(user_id: int) -> bool:
     """Проверяет, является ли пользователь админом."""
-    user = get_user(user_id)
+    user = await get_user(user_id)  # Добавляем await
     if user:
         result = user["is_admin"]
         logging.info(f"Проверка: пользователь {user_id} является админом? {result}")
@@ -87,10 +87,10 @@ def create_arrival_time_keyboard() -> InlineKeyboardMarkup:
 async def process_checkin(callback: types.CallbackQuery, state: FSMContext):
     """Выбор существующего спота или добавление нового."""
     user_id = callback.from_user.id
-    user = get_user(user_id)
+    user = await get_user(user_id)  # Добавляем await
     if not user:
         # Регистрируем пользователя
-        add_or_update_user(
+        await add_or_update_user(  # Добавляем await
             user_id=user_id,
             first_name=callback.from_user.first_name,
             last_name=callback.from_user.last_name,
@@ -98,10 +98,10 @@ async def process_checkin(callback: types.CallbackQuery, state: FSMContext):
         )
     
     logging.info(f"Пользователь {user_id} нажал на Чек-ин (callback)")
-    spots = get_spots() or []
+    spots = await get_spots() or []  # Добавляем await
 
     if spots:
-        keyboard = create_spot_keyboard(spots, is_admin(user_id))
+        keyboard = create_spot_keyboard(spots, await is_admin(user_id))  # Добавляем await для is_admin
         await callback.message.answer("Выберите спот для чекаина:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
@@ -163,10 +163,10 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot
     user_id = callback.from_user.id
 
     # Выполняем чек-ин
-    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=duration_hours)
+    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=duration_hours)  # Уже асинхронная
     
     # Получаем информацию о споте для отображения на карте
-    spot = get_spot_by_id(spot_id)
+    spot = await get_spot_by_id(spot_id)  # Добавляем await
     await callback.message.edit_text("\u2705 Вы зачекинились! 🌊")
     await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
     
@@ -201,10 +201,10 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
     user_id = callback.from_user.id
 
     # Выполняем чек-ин
-    await checkin_user(user_id, spot_id, checkin_type=2, bot=bot, arrival_time=arrival_time)
+    await checkin_user(user_id, spot_id, checkin_type=2, bot=bot, arrival_time=arrival_time)  # Уже асинхронная
     
     # Получаем информацию о споте для отображения на карте
-    spot = get_spot_by_id(spot_id)
+    spot = await get_spot_by_id(spot_id)  # Добавляем await
     await callback.message.edit_text(f"\u2705 Вы запланировали приезд на спот '{spot['name']}'! 🌊")
     await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
     
@@ -223,7 +223,7 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
 async def confirm_arrival(callback: types.CallbackQuery, state: FSMContext):
     """Пользователь подтверждает, что приехал на спот."""
     user_id = callback.from_user.id
-    active_checkin = get_active_checkin(user_id)
+    active_checkin = await get_active_checkin(user_id)  # Добавляем await
     if not active_checkin or active_checkin["checkin_type"] != 2:
         await callback.message.edit_text("❌ У вас нет запланированного чек-ина.")
         keyboard = InlineKeyboardMarkup(
@@ -261,11 +261,11 @@ async def process_arrival_duration(callback: types.CallbackQuery, state: FSMCont
     checkin_id = data["checkin_id"]
     
     # Обновляем чек-ин: переводим в тип 1 и задаём длительность
-    update_checkin_to_arrived(checkin_id, duration_hours)
+    await update_checkin_to_arrived(checkin_id, duration_hours)  # Добавляем await
     
     # Получаем информацию о споте для отображения на карте
-    active_checkin = get_active_checkin(callback.from_user.id)
-    spot = get_spot_by_id(active_checkin["spot_id"])
+    active_checkin = await get_active_checkin(callback.from_user.id)  # Добавляем await
+    spot = await get_spot_by_id(active_checkin["spot_id"])  # Добавляем await
     await callback.message.edit_text("\u2705 Вы подтвердили прибытие и зачекинились! 🌊")
     await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
     
@@ -283,10 +283,10 @@ async def process_arrival_duration(callback: types.CallbackQuery, state: FSMCont
 @checkin_router.callback_query(F.data == "cancel_checkin")
 async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
     """Отмена чек-ина, возвращение к выбору спота."""
-    spots = get_spots() or []
+    spots = await get_spots() or []  # Добавляем await
     user_id = callback.from_user.id
     if spots:
-        keyboard = create_spot_keyboard(spots, is_admin(user_id))
+        keyboard = create_spot_keyboard(spots, await is_admin(user_id))  # Добавляем await для is_admin
         await callback.message.edit_text("Выберите спот для чекаина:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
@@ -305,12 +305,12 @@ async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
 async def edit_spot(callback: types.CallbackQuery, state: FSMContext):
     """Начало редактирования спота (только для админа): сначала геопозиция."""
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):  # Добавляем await
         await callback.answer("❌ У вас нет прав для редактирования спотов.", show_alert=True)
         return
 
     spot_id = int(callback.data.split("_")[2])
-    spots = get_spots()
+    spots = await get_spots()  # Добавляем await
     spot = next((s for s in spots if s["id"] == spot_id), None)
     if not spot:
         await callback.message.answer("❌ Спот не найден.")
@@ -336,7 +336,7 @@ async def process_new_location(message: types.Message, state: FSMContext):
     new_lat, new_lon = message.location.latitude, message.location.longitude
     data = await state.get_data()
     spot_id = data["spot_id"]
-    update_spot_location(spot_id, new_lat, new_lon)
+    await update_spot_location(spot_id, new_lat, new_lon)  # Добавляем await
     logging.info(f"Админ {message.from_user.id} обновил геопозицию спота ID {spot_id}: Lat={new_lat}, Lon={new_lon}")
 
     await message.answer("📍 Геопозиция обновлена! Теперь введите новое название спота:", reply_markup=ReplyKeyboardRemove())
@@ -363,7 +363,7 @@ async def process_new_spot_name(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     spot_id = data["spot_id"]
-    update_spot_name(spot_id, new_name)
+    await update_spot_name(spot_id, new_name)  # Добавляем await
     logging.info(f"Админ {message.from_user.id} обновил название спота ID {spot_id} на '{new_name}'")
 
     keyboard = InlineKeyboardMarkup(
@@ -383,7 +383,7 @@ async def handle_invalid_new_spot_name(message: types.Message, state: FSMContext
 async def confirm_delete_spot(callback: types.CallbackQuery, state: FSMContext):
     """Запрашиваем подтверждение удаления спота (только для админа)."""
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):  # Добавляем await
         await callback.answer("❌ У вас нет прав для удаления спотов.", show_alert=True)
         return
 
@@ -404,12 +404,12 @@ async def confirm_delete_spot(callback: types.CallbackQuery, state: FSMContext):
 async def delete_spot_handler(callback: types.CallbackQuery, state: FSMContext):
     """Удаление спота после подтверждения."""
     user_id = callback.from_user.id
-    if not is_admin(user_id):
+    if not await is_admin(user_id):  # Добавляем await
         await callback.answer("❌ У вас нет прав для удаления спотов.", show_alert=True)
         return
 
     spot_id = int(callback.data.split("_")[2])
-    delete_spot(spot_id)
+    await delete_spot(spot_id)  # Добавляем await
     logging.info(f"Админ {user_id} удалил спот ID {spot_id}")
 
     keyboard = InlineKeyboardMarkup(
@@ -425,9 +425,9 @@ async def delete_spot_handler(callback: types.CallbackQuery, state: FSMContext):
 async def cancel_delete_spot(callback: types.CallbackQuery, state: FSMContext):
     """Отмена удаления спота."""
     user_id = callback.from_user.id
-    spots = get_spots() or []
+    spots = await get_spots() or []  # Добавляем await
     if spots:
-        keyboard = create_spot_keyboard(spots, is_admin(user_id))
+        keyboard = create_spot_keyboard(spots, await is_admin(user_id))  # Добавляем await для is_admin
         await callback.message.edit_text("Выберите спот для чекаина:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
@@ -476,7 +476,7 @@ async def handle_invalid_location(message: types.Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-    await message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
+    await message.answer("Normalize below:", reply_markup=keyboard)
 
 @checkin_router.message(CheckinState.naming_spot, F.text)
 async def add_new_spot_handler(message: types.Message, state: FSMContext, bot: Bot):
@@ -491,8 +491,8 @@ async def add_new_spot_handler(message: types.Message, state: FSMContext, bot: B
     user_id = message.from_user.id
     logging.info(f"Пользователь {user_id} создаёт спот '{spot_name}' с координатами: {lat}, {lon}")
     
-    spot_id = add_spot(spot_name, lat, lon)
-    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=1)  # По умолчанию 1 час
+    spot_id = await add_spot(spot_name, lat, lon)  # Добавляем await
+    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=1)  # Уже асинхронная
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -522,7 +522,7 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
 async def process_uncheckin(callback: types.CallbackQuery, state: FSMContext):
     """Обрабатываем разчекин пользователя."""
     user_id = callback.from_user.id
-    active_checkin = get_active_checkin(user_id)
+    active_checkin = await get_active_checkin(user_id)  # Добавляем await
     
     if not active_checkin:
         await callback.message.edit_text("❌ У вас нет активных чек-инов.")
@@ -536,8 +536,8 @@ async def process_uncheckin(callback: types.CallbackQuery, state: FSMContext):
         return
 
     # Разчекиниваем пользователя
-    checkout_user(active_checkin["id"])
-    spot = get_spot_by_id(active_checkin["spot_id"])
+    await checkout_user(active_checkin["id"])  # Добавляем await
+    spot = await get_spot_by_id(active_checkin["spot_id"])  # Добавляем await
     await callback.message.edit_text(f"\u2705 Вы успешно разчекинились со спота '{spot['name']}'! 🚪")
     
     keyboard = InlineKeyboardMarkup(
