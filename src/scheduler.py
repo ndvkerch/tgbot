@@ -35,7 +35,7 @@ async def check_expired_checkins(bot=None):
                         spot_name = (await cursor.fetchone())[0]
                         await bot.send_message(
                             chat_id=user_id,
-                            text=f"⏰ Время вашего пребывания на споте '{spot_name}' истекло. Вы были автоматически разчекинены."
+                            text=f"⏰ Время вашего пребывания на споте '{spot_name}' истекло. Вы автоматически покинули спот."
                         )
                         logging.info(f"✅ Уведомление о разчекине отправлено пользователю {user_id}")
                     except Exception as e:

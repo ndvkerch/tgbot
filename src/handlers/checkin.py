@@ -50,7 +50,7 @@ def create_spot_keyboard(spots: list, is_admin: bool) -> InlineKeyboardMarkup:
 def create_checkin_type_keyboard() -> InlineKeyboardMarkup:
     """Создаёт клавиатуру для выбора типа чек-ина."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Я уже на споте", callback_data="checkin_type_1")],
+        [InlineKeyboardButton(text="Я на споте", callback_data="checkin_type_1")],
         [InlineKeyboardButton(text="Планирую приехать", callback_data="checkin_type_2")],
         [InlineKeyboardButton(text="⬅️ Отмена", callback_data="cancel_checkin")]
     ])
@@ -102,7 +102,7 @@ async def process_checkin(callback: types.CallbackQuery, state: FSMContext):
 
     if spots:
         keyboard = create_spot_keyboard(spots, await is_admin(user_id))  # Добавляем await для is_admin
-        await callback.message.answer("Выберите спот для чекаина:", reply_markup=keyboard)
+        await callback.message.answer("Выберите спот:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
         await callback.message.answer("\U0001F50D Похоже, рядом нет спотов. \nОтправьте свою геолокацию, чтобы создать новый.")
@@ -117,12 +117,22 @@ async def process_checkin(callback: types.CallbackQuery, state: FSMContext):
 
 @checkin_router.callback_query(F.data.startswith("spot_"))
 async def select_checkin_type(callback: types.CallbackQuery, state: FSMContext):
-    """Пользователь выбрал спот, теперь выбираем тип чек-ина."""
+    """Пользователь выбрал спот, показываем карту и запрашиваем тип действия в одном сообщении."""
     spot_id = int(callback.data.split("_")[1])
-    await state.update_data(spot_id=spot_id)
-    
+    spot = await get_spot_by_id(spot_id)
+    if not spot:
+        await callback.message.answer("❌ Спот не найден.")
+        await callback.answer()
+        return
+
+    # Отправляем карту спота
+    await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
+
+    # Отправляем сообщение о выборе спота с клавиатурой
     keyboard = create_checkin_type_keyboard()
-    await callback.message.edit_text("Выберите тип чек-ина:", reply_markup=keyboard)
+    await callback.message.answer(f"Вы выбрали спот: {spot['name']}\nВыберите действие:", reply_markup=keyboard)
+
+    await state.update_data(spot_id=spot_id)
     await state.set_state(CheckinState.selecting_checkin_type)
     await callback.answer()
 
@@ -167,13 +177,12 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot
     
     # Получаем информацию о споте для отображения на карте
     spot = await get_spot_by_id(spot_id)  # Добавляем await
-    await callback.message.edit_text("\u2705 Вы зачекинились! 🌊")
-    await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
+    await callback.message.edit_text(f"\u2705 Вы отметились на споте '{spot['name']}'! 🌊")
     
     # Динамическая клавиатура после чек-ина
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚪 Разчекиниться", callback_data="uncheckin")],
+            [InlineKeyboardButton(text="🚪 Покинуть спот", callback_data="uncheckin")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
@@ -206,7 +215,6 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
     # Получаем информацию о споте для отображения на карте
     spot = await get_spot_by_id(spot_id)  # Добавляем await
     await callback.message.edit_text(f"\u2705 Вы запланировали приезд на спот '{spot['name']}'! 🌊")
-    await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
     
     # Динамическая клавиатура после планирования приезда
     keyboard = InlineKeyboardMarkup(
@@ -266,8 +274,7 @@ async def process_arrival_duration(callback: types.CallbackQuery, state: FSMCont
     # Получаем информацию о споте для отображения на карте
     active_checkin = await get_active_checkin(callback.from_user.id)  # Добавляем await
     spot = await get_spot_by_id(active_checkin["spot_id"])  # Добавляем await
-    await callback.message.edit_text("\u2705 Вы подтвердили прибытие и зачекинились! 🌊")
-    await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
+    await callback.message.edit_text(f"\u2705 Вы прибыли и отметились на споте '{spot['name']}'! 🌊")
     
     # Динамическая клавиатура после подтверждения прибытия
     keyboard = InlineKeyboardMarkup(
@@ -287,7 +294,7 @@ async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     if spots:
         keyboard = create_spot_keyboard(spots, await is_admin(user_id))  # Добавляем await для is_admin
-        await callback.message.edit_text("Выберите спот для чекаина:", reply_markup=keyboard)
+        await callback.message.edit_text("Выберите спот:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
         await callback.message.edit_text("\U0001F50D Похоже, рядом нет спотов. \nОтправьте свою геолокацию, чтобы создать новый.")
@@ -525,7 +532,7 @@ async def process_uncheckin(callback: types.CallbackQuery, state: FSMContext):
     active_checkin = await get_active_checkin(user_id)  # Добавляем await
     
     if not active_checkin:
-        await callback.message.edit_text("❌ У вас нет активных чек-инов.")
+        await callback.message.edit_text("❌ Вы еще не отметились на споте.")
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
@@ -538,7 +545,7 @@ async def process_uncheckin(callback: types.CallbackQuery, state: FSMContext):
     # Разчекиниваем пользователя
     await checkout_user(active_checkin["id"])  # Добавляем await
     spot = await get_spot_by_id(active_checkin["spot_id"])  # Добавляем await
-    await callback.message.edit_text(f"\u2705 Вы успешно разчекинились со спота '{spot['name']}'! 🚪")
+    await callback.message.edit_text(f"\u2705 Вы покинули спот '{spot['name']}'! 🚪")
     
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
