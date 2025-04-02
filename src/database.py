@@ -118,15 +118,15 @@ async def get_spots() -> list:
         logging.error(f"❌ Ошибка при получении списка спотов: {e}")
         return []
 
-async def add_spot(name: str, lat: float, lon: float) -> int:
+async def add_spot(name: str, lat: float, lon: float, creator_id: int) -> int:
     """Добавляет новый спот в БД и возвращает его ID."""
     try:
         async with aiosqlite.connect(DB_PATH) as conn:
             cursor = await conn.cursor()
-            await cursor.execute("INSERT INTO spots (name, latitude, longitude) VALUES (?, ?, ?)", (name, lat, lon))
+            await cursor.execute("INSERT INTO spots (name, latitude, longitude, creator_id) VALUES (?, ?, ?, ?)", (name, lat, lon, creator_id))
             await conn.commit()
             spot_id = cursor.lastrowid
-            logging.info(f"✅ Новый спот добавлен: ID={spot_id}, Name={name}, Lat={lat}, Lon={lon}")
+            logging.info(f"✅ Новый спот добавлен: ID={spot_id}, Name={name}, Lat={lat}, Lon={lon}, Creator={creator_id}")
             return spot_id
     except Exception as e:
         logging.error(f"❌ Ошибка при добавлении спота: {e}")

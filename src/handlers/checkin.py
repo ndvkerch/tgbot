@@ -490,7 +490,7 @@ async def add_new_spot_handler(message: types.Message, state: FSMContext, bot: B
     user_id = message.from_user.id
     logging.info(f"Пользователь {user_id} создаёт спот '{spot_name}' с координатами: {lat}, {lon}")
     
-    spot_id = await add_spot(spot_name, lat, lon)  # Добавляем await
+    spot_id = await add_spot(spot_name, lat, lon, creator_id=user_id) # Создаём спот с указанием создателя
     await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=1)  # Уже асинхронная
     
     keyboard = InlineKeyboardMarkup(
