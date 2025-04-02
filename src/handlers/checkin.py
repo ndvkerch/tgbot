@@ -521,7 +521,9 @@ async def back_to_menu(callback: types.CallbackQuery, state: FSMContext):
     """Возвращаемся в главное меню."""
     user_id = callback.from_user.id
     await callback.message.delete()
-    await callback.message.answer("Вы вернулись в главное меню.", reply_markup=get_main_keyboard(user_id))
+    # Используем await для получения результата функции get_main_keyboard
+    reply_markup = await get_main_keyboard(user_id)
+    await callback.message.answer("Вы вернулись в главное меню.", reply_markup=reply_markup)
     await state.clear()
     await callback.answer()
 

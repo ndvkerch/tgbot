@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import get_active_checkin, get_spots
 
-def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
+async def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Генерирует динамическую клавиатуру в зависимости от состояния пользователя."""
     # Базовые кнопки, которые всегда видны
     buttons = [
@@ -10,13 +10,13 @@ def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     ]
 
     # Проверяем, есть ли активный чек-ин
-    active_checkin = get_active_checkin(user_id)
+    active_checkin = await get_active_checkin(user_id)
     if active_checkin:
         buttons.append([InlineKeyboardButton(text="🚪 Покинуть спот", callback_data="uncheckin")])
 
     # Проверяем, есть ли споты в базе
-    spots = get_spots()
+    spots = await get_spots()
     if spots:
-        buttons.append([InlineKeyboardButton(text="🔍 Ближайшие споты", callback_data="nearby_spots")])
+        buttons.append([InlineKeyboardButton(text="🔍 Кто на спотах", callback_data="nearby_spots")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)

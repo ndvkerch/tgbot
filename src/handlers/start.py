@@ -12,9 +12,9 @@ async def start_command(message: types.Message):
 
     # Регистрируем пользователя, если он ещё не в базе
     user_id = message.from_user.id
-    user = get_user(user_id)
+    user = await get_user(user_id)
     if not user:
-        add_or_update_user(
+        await add_or_update_user(
             user_id=user_id,
             first_name=message.from_user.first_name,
             last_name=message.from_user.last_name,
@@ -34,4 +34,5 @@ async def start_command(message: types.Message):
     ).format(name=message.from_user.full_name)
 
     # Отправляем сообщение с динамической клавиатурой
-    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
+    reply_markup = await get_main_keyboard(user_id)
+    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
