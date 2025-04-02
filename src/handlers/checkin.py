@@ -62,9 +62,9 @@ def create_duration_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="1 час", callback_data="duration_1"),
          InlineKeyboardButton(text="2 часа", callback_data="duration_2"),
          InlineKeyboardButton(text="3 часа", callback_data="duration_3")],
-        [InlineKeyboardButton(text="До 12:00", callback_data="until_12:00"),
-         InlineKeyboardButton(text="До 15:00", callback_data="until_15:00"),
-         InlineKeyboardButton(text="До 18:00", callback_data="until_18:00")],
+        [InlineKeyboardButton(text="4 часа", callback_data="duration_4"),
+         InlineKeyboardButton(text="5 часов", callback_data="duration_5"),
+         InlineKeyboardButton(text="6 часов", callback_data="duration_6")],
         [InlineKeyboardButton(text="⬅️ Отмена", callback_data="cancel_checkin")]
     ])
     return keyboard
@@ -158,15 +158,7 @@ async def checkin_type_2(callback: types.CallbackQuery, state: FSMContext):
 async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     """Обрабатываем длительность пребывания и выполняем чек-ин."""
     duration_str = callback.data.split("_")[1]
-    duration_hours = float(duration_str) if duration_str in ["1", "2", "3"] else None
-    
-    if duration_str.startswith("until_"):
-        target_hour = int(duration_str.split("_")[1].split(":")[0])
-        now = datetime.utcnow()
-        target_time = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-        if target_time < now:
-            target_time += timedelta(days=1)
-        duration_hours = (target_time - now).total_seconds() / 3600
+    duration_hours = int(duration_str)
 
     data = await state.get_data()
     spot_id = data["spot_id"]
