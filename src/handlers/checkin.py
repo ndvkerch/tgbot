@@ -554,6 +554,7 @@ async def process_uncheckin(callback: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
-    await callback.message.answer("Вернитесь в меню:", reply_markup=get_main_keyboard(user_id))
+    reply_markup = await get_main_keyboard(user_id)
+    await callback.message.answer("Вернитесь в меню:", reply_markup=reply_markup)
     await state.clear()
     await callback.answer()
