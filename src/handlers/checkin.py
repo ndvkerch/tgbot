@@ -479,7 +479,7 @@ async def handle_invalid_location(message: types.Message, state: FSMContext):
 
 @checkin_router.message(CheckinState.naming_spot, F.text)
 async def add_new_spot_handler(message: types.Message, state: FSMContext, bot: Bot):
-    """Создаём новый спот с введённым названием и чекиним пользователя."""
+    """Создаём новый спот и предлагаем отметиться"""
     spot_name = message.text.strip()
     if not spot_name:
         await message.answer("❌ Название спота не может быть пустым. Пожалуйста, введите название ещё раз:")
@@ -489,18 +489,50 @@ async def add_new_spot_handler(message: types.Message, state: FSMContext, bot: B
     lat, lon = data["lat"], data["lon"]
     user_id = message.from_user.id
     logging.info(f"Пользователь {user_id} создаёт спот '{spot_name}' с координатами: {lat}, {lon}")
+
+    # Создаем спот
+    spot_id = await add_spot(spot_name, lat, lon, creator_id=user_id)
     
-    spot_id = await add_spot(spot_name, lat, lon, creator_id=user_id) # Создаём спот с указанием создателя
-    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=1)  # Уже асинхронная
+    # Сохраняем ID спота в состоянии
+    await state.update_data(spot_id=spot_id)
     
+    # Предлагаем выбрать действие
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚪 Разчекиниться", callback_data="uncheckin")],
+            [InlineKeyboardButton(text="✅ Отметиться сейчас", callback_data="checkin_new_spot")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
-    await message.answer(f"\u2705 Спот '{spot_name}' создан!\nВы зачекинились здесь на 1 час. 🌊", reply_markup=keyboard)
-    await state.clear()
+    await message.answer(
+        f"\u2705 Спот '{spot_name}' успешно создан!\n"
+        "Хотите отметить свое присутствие на споте?",
+        reply_markup=keyboard
+    )
+    await state.set_state(CheckinState.choosing_spot)  # Устанавливаем состояние выбора спота
+    await state.update_data(new_spot_created=True)  # Флаг, что спот только что создан
+
+@checkin_router.callback_query(F.data == "checkin_new_spot")
+async def handle_new_spot_checkin(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка чекина на только что созданном споте"""
+    data = await state.get_data()
+    spot_id = data.get("spot_id")
+    
+    if not spot_id:
+        await callback.answer("❌ Ошибка: спот не найден")
+        return
+        
+    # Показываем карту спота
+    spot = await get_spot_by_id(spot_id)
+    await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
+    
+    # Запускаем стандартный процесс выбора типа чекина
+    keyboard = create_checkin_type_keyboard()
+    await callback.message.answer(
+        f"Вы создали спот: {spot['name']}\nВыберите действие:", 
+        reply_markup=keyboard
+    )
+    await state.set_state(CheckinState.selecting_checkin_type)
+    await callback.answer()
 
 @checkin_router.message(CheckinState.naming_spot)
 async def handle_invalid_spot_name(message: types.Message, state: FSMContext):
