@@ -75,9 +75,6 @@ def create_arrival_time_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Через 1 час", callback_data="arrival_1"),
          InlineKeyboardButton(text="Через 2 часа", callback_data="arrival_2"),
          InlineKeyboardButton(text="Через 3 часа", callback_data="arrival_3")],
-        [InlineKeyboardButton(text="В 12:00", callback_data="arrival_12:00"),
-         InlineKeyboardButton(text="В 15:00", callback_data="arrival_15:00"),
-         InlineKeyboardButton(text="В 18:00", callback_data="arrival_18:00")],
         [InlineKeyboardButton(text="⬅️ Отмена", callback_data="cancel_checkin")]
     ])
     return keyboard
@@ -165,20 +162,23 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot
     user_id = callback.from_user.id
 
     # Выполняем чек-ин
-    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=duration_hours)  # Уже асинхронная
+    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=duration_hours)
     
     # Получаем информацию о споте для отображения на карте
-    spot = await get_spot_by_id(spot_id)  # Добавляем await
-    await callback.message.edit_text(f"\u2705 Вы отметились на споте '{spot['name']}'! 🌊")
+    spot = await get_spot_by_id(spot_id)
     
-    # Динамическая клавиатура после чек-ина
+    # Добавляем клавиатуру прямо в отредактированное сообщение
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🚪 Покинуть спот", callback_data="uncheckin")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
-    await callback.message.answer("Вы находитесь здесь:", reply_markup=keyboard)
+    await callback.message.edit_text(
+        f"\u2705 Вы отметились на споте '{spot['name']}'! 🌊",
+        reply_markup=keyboard
+    )
+    
     await state.clear()
     await callback.answer()
 
@@ -188,27 +188,21 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
     arrival_str = callback.data.split("_")[1]
     now = datetime.utcnow()
     
-    if arrival_str in ["1", "2", "3"]:
-        arrival_time = (now + timedelta(hours=int(arrival_str))).isoformat()
-    else:
-        target_hour = int(arrival_str.split(":")[0])
-        target_time = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
-        if target_time < now:
-            target_time += timedelta(days=1)
-        arrival_time = target_time.isoformat()
+    # Теперь arrival_str может быть только "1", "2" или "3"
+    arrival_time = (now + timedelta(hours=int(arrival_str))).isoformat()
 
     data = await state.get_data()
     spot_id = data["spot_id"]
     user_id = callback.from_user.id
 
-    # Выполняем чек-ин
-    await checkin_user(user_id, spot_id, checkin_type=2, bot=bot, arrival_time=arrival_time)  # Уже асинхронная
+    # Выполняем чек-ин с типом "Планирую приехать"
+    await checkin_user(user_id, spot_id, checkin_type=2, bot=bot, arrival_time=arrival_time)
     
     # Получаем информацию о споте для отображения на карте
-    spot = await get_spot_by_id(spot_id)  # Добавляем await
+    spot = await get_spot_by_id(spot_id)
     await callback.message.edit_text(f"\u2705 Вы запланировали приезд на спот '{spot['name']}'! 🌊")
     
-    # Динамическая клавиатура после планирования приезда
+    # Клавиатура для подтверждения прибытия
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Я приехал!", callback_data="confirm_arrival")],
@@ -223,7 +217,7 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
 async def confirm_arrival(callback: types.CallbackQuery, state: FSMContext):
     """Пользователь подтверждает, что приехал на спот."""
     user_id = callback.from_user.id
-    active_checkin = await get_active_checkin(user_id)  # Добавляем await
+    active_checkin = await get_active_checkin(user_id)
     if not active_checkin or active_checkin["checkin_type"] != 2:
         await callback.message.edit_text("❌ У вас нет запланированного чек-ина.")
         keyboard = InlineKeyboardMarkup(
@@ -236,7 +230,8 @@ async def confirm_arrival(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    await state.update_data(checkin_id=active_checkin["id"])
+    # Сохраняем checkin_id и spot_id в состоянии
+    await state.update_data(checkin_id=active_checkin["id"], spot_id=active_checkin["spot_id"])
     await callback.message.edit_text("Сколько вы планируете здесь находиться?")
     keyboard = create_duration_keyboard()
     await callback.message.answer("Выберите длительность:", reply_markup=keyboard)
@@ -259,23 +254,27 @@ async def process_arrival_duration(callback: types.CallbackQuery, state: FSMCont
 
     data = await state.get_data()
     checkin_id = data["checkin_id"]
+    spot_id = data.get("spot_id")
     
     # Обновляем чек-ин: переводим в тип 1 и задаём длительность
-    await update_checkin_to_arrived(checkin_id, duration_hours)  # Добавляем await
+    await update_checkin_to_arrived(checkin_id, duration_hours)
     
     # Получаем информацию о споте для отображения на карте
-    active_checkin = await get_active_checkin(callback.from_user.id)  # Добавляем await
-    spot = await get_spot_by_id(active_checkin["spot_id"])  # Добавляем await
-    await callback.message.edit_text(f"\u2705 Вы прибыли и отметились на споте '{spot['name']}'! 🌊")
+    active_checkin = await get_active_checkin(callback.from_user.id)
+    spot = await get_spot_by_id(spot_id or active_checkin["spot_id"])
     
-    # Динамическая клавиатура после подтверждения прибытия
+    # Добавляем клавиатуру прямо в отредактированное сообщение
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🚪 Разчекиниться", callback_data="uncheckin")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
         ]
     )
-    await callback.message.answer("Вы находитесь здесь:", reply_markup=keyboard)
+    await callback.message.edit_text(
+        f"\u2705 Вы прибыли и отметились на споте '{spot['name']}'! 🌊",
+        reply_markup=keyboard
+    )
+    
     await state.clear()
     await callback.answer()
 
