@@ -12,7 +12,12 @@ async def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
     # Проверяем, есть ли активный чек-ин
     active_checkin = await get_active_checkin(user_id)
     if active_checkin:
-        buttons.append([InlineKeyboardButton(text="🚪 Покинуть спот", callback_data="uncheckin")])
+        if active_checkin["checkin_type"] == 1:
+            # Если пользователь уже на споте
+            buttons.append([InlineKeyboardButton(text="🚪 Покинуть спот", callback_data="uncheckin")])
+        elif active_checkin["checkin_type"] == 2:
+            # Если пользователь запланировал приезд
+            buttons.append([InlineKeyboardButton(text="✅ Я приехал", callback_data="confirm_arrival")])
 
     # Проверяем, есть ли споты в базе
     spots = await get_spots()
