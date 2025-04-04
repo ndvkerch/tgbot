@@ -7,6 +7,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database import get_spots, get_spot_by_id, get_active_checkin, get_checkins_for_spot
+from services.weather import get_windy_forecast, wind_direction_to_text  # Добавляем импорт
 
 logging.basicConfig(level=logging.INFO)
 spots_router = Router()
@@ -24,7 +25,6 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     c = 2 * math.asin(math.sqrt(a))
     return R * c
 
-
 @spots_router.callback_query(F.data == "nearby_spots")
 async def request_location_for_nearby_spots(callback: types.CallbackQuery, state: FSMContext):
     """Запрашиваем геолокацию для поиска ближайших спотов."""
@@ -40,10 +40,10 @@ async def request_location_for_nearby_spots(callback: types.CallbackQuery, state
 
 @spots_router.message(NearbySpotsState.waiting_for_location, F.location)
 async def process_location_for_nearby_spots(message: types.Message, state: FSMContext):
-    """Обрабатываем геолокацию и показываем 5 ближайших спотов."""
+    """Обрабатываем геолокацию и показываем 5 ближайших спотов с данными о ветре."""
     user_lat = message.location.latitude
     user_lon = message.location.longitude
-    spots = await get_spots() or []  # Добавили await
+    spots = await get_spots() or []  # Получаем список спотов
 
     if not spots:
         await message.answer("❌ Похоже, в базе нет спотов.", reply_markup=ReplyKeyboardRemove())
@@ -67,12 +67,23 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     # Формируем ответ
     response = "🔍 Ближайшие споты:\n\n"
     for spot, distance in nearest_spots:
-        on_spot_count, on_spot_users, arriving_users = await get_checkins_for_spot(spot["id"])  # Добавили await
+        on_spot_count, on_spot_users, arriving_users = await get_checkins_for_spot(spot["id"])
         on_spot_names = ", ".join(user["first_name"] for user in on_spot_users) if on_spot_users else "никого"
         arriving_info = ", ".join(f"{user['first_name']} ({user['arrival_time']})" for user in arriving_users) if arriving_users else "нет"
+
+        # Запрашиваем данные о ветре для текущего спота
+        wind_data = await get_windy_forecast(spot["lat"], spot["lon"])
+        wind_info = "Данные о ветре недоступны."
+        if wind_data:
+            wind_speed = wind_data["speed"]
+            wind_direction = wind_data["direction"]
+            direction_text = wind_direction_to_text(wind_direction)
+            wind_info = f"{wind_speed:.1f} м/с, {direction_text} ({wind_direction:.0f}°)"
+
         response += (
             f"Спот: {spot['name']}\n"
             f"Расстояние: {distance:.2f} км\n"
+            f"🌬 Ветер: {wind_info}\n"
             f"На месте: {on_spot_count} чел. ({on_spot_names})\n"
             f"Приедут: {len(arriving_users)} чел. ({arriving_info})\n\n"
         )
