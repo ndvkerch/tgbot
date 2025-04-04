@@ -299,6 +299,28 @@ async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(CheckinState.adding_spot)
     await callback.answer()
 
+@checkin_router.callback_query(F.data == "plan_to_arrive")
+async def plan_to_arrive(callback: types.CallbackQuery, state: FSMContext):
+    """Обработчик кнопки 'Собираюсь на спот': запрашиваем время прибытия."""
+    data = await state.get_data()
+    spot_id = data.get("spot_id")
+    
+    if not spot_id:
+        await callback.message.answer("❌ Спот не выбран. Пожалуйста, выберите спот сначала.")
+        spots = await get_spots() or []
+        keyboard = create_spot_keyboard(spots, await is_admin(callback.from_user.id))
+        await callback.message.answer("Выберите спот:", reply_markup=keyboard)
+        await state.set_state(CheckinState.choosing_spot)
+        await callback.answer()
+        return
+
+    spot = await get_spot_by_id(spot_id)
+    await callback.message.edit_text(f"Вы выбрали спот: {spot['name']}\nКогда вы планируете приехать?")
+    keyboard = create_arrival_time_keyboard()
+    await callback.message.answer("Выберите время прибытия:", reply_markup=keyboard)
+    await state.set_state(CheckinState.setting_arrival_time)
+    await callback.answer()    
+
 # Блок 3: Обработчики для редактирования и удаления спотов (для админов)
 @checkin_router.callback_query(F.data.startswith("edit_spot_"))
 async def edit_spot(callback: types.CallbackQuery, state: FSMContext):
