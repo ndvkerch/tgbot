@@ -27,6 +27,7 @@ async def init_db():
                 username TEXT,
                 is_admin BOOLEAN NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
+                timezone TEXT
             )""")
             
             # Таблица spots
@@ -71,15 +72,24 @@ async def init_db():
         logging.error(f"❌ Ошибка при инициализации БД: {e}")
 
 # Блок 2: Функции для работы с пользователями
-async def add_or_update_user(user_id: int, first_name: str, last_name: str = None, username: str = None, is_admin: bool = False):
+async def add_or_update_user(
+    user_id: int, 
+    first_name: str, 
+    last_name: str = None, 
+    username: str = None, 
+    is_admin: bool = False, 
+    timezone: str = None  # Добавляем параметр
+):
     """Добавляет нового пользователя или обновляет существующего."""
     try:
         async with aiosqlite.connect(DB_PATH) as conn:
             cursor = await conn.cursor()
             await cursor.execute("""
-                INSERT OR REPLACE INTO users (user_id, first_name, last_name, username, is_admin, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, first_name, last_name, username, is_admin, datetime.utcnow().isoformat()))
+                INSERT OR REPLACE INTO users 
+                (user_id, first_name, last_name, username, is_admin, created_at, timezone)
+                VALUES (?, ?, ?, ?, ?, ?, ?)  -- Добавляем timezone
+            """, (user_id, first_name, last_name, username, is_admin, 
+                  datetime.utcnow().isoformat(), timezone))  # Добавляем значение
             await conn.commit()
             logging.info(f"✅ Пользователь {user_id} добавлен/обновлён")
     except Exception as e:
