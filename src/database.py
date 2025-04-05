@@ -165,6 +165,41 @@ async def delete_spot(spot_id: int) -> None:
         logger.error(f"Ошибка удаления спота: {str(e)}")
         raise
 
+async def get_spot_by_id(spot_id: int) -> dict:
+    """Возвращает данные спота по ID"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            cursor = await conn.execute('''
+                SELECT id, name, latitude, longitude 
+                FROM spots 
+                WHERE id = ?
+            ''', (spot_id,))
+            row = await cursor.fetchone()
+            return {
+                "id": row[0],
+                "name": row[1],
+                "lat": row[2],
+                "lon": row[3]
+            } if row else None
+    except Exception as e:
+        logger.error(f"Ошибка получения спота: {str(e)}")
+        return None
+
+async def update_spot_location(spot_id: int, new_lat: float, new_lon: float) -> None:
+    """Обновляет координаты спота"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            await conn.execute('''
+                UPDATE spots 
+                SET latitude = ?, longitude = ? 
+                WHERE id = ?
+            ''', (new_lat, new_lon, spot_id))
+            await conn.commit()
+            logger.info(f"Координаты спота {spot_id} обновлены")
+    except Exception as e:
+        logger.error(f"Ошибка обновления координат: {str(e)}")
+        raise
+
 # Блок 4: Работа с чекинами
 async def checkin_user(
     user_id: int,
@@ -175,6 +210,7 @@ async def checkin_user(
 ) -> None:
     """Создание чекина с учётом часового пояса"""
     try:
+        await deactivate_all_checkins(user_id)
         user = await get_user(user_id)
         tz = pytz.timezone(user['timezone'])
         
@@ -243,6 +279,63 @@ async def checkout_user(checkin_id: int) -> None:
         logger.error(f"Ошибка завершения чекина: {str(e)}")
         raise
 
+async def update_checkin_to_arrived(checkin_id: int, duration_hours: float) -> None:
+    """Обновляет чек-ин при подтверждении прибытия"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            timestamp = datetime.utcnow()
+            end_time = (timestamp + timedelta(hours=duration_hours)).isoformat()
+            await conn.execute('''
+                UPDATE checkins SET 
+                    checkin_type = 1,
+                    duration_hours = ?,
+                    arrival_time = NULL,
+                    end_time = ?
+                WHERE id = ?
+            ''', (duration_hours, end_time, checkin_id))
+            await conn.commit()
+            logger.info(f"Чек-ин {checkin_id} обновлён")
+    except Exception as e:
+        logger.error(f"Ошибка обновления: {str(e)}")
+        raise
+
+async def get_checkins_for_user(user_id: int) -> list:
+    """Получение всех чек-инов пользователя"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            cursor = await conn.execute('''
+                SELECT id, spot_id, timestamp, checkin_type, duration_hours, arrival_time, end_time
+                FROM checkins 
+                WHERE user_id = ?
+            ''', (user_id,))
+            return [{
+                "id": row[0],
+                "spot_id": row[1],
+                "timestamp": row[2],
+                "checkin_type": row[3],
+                "duration_hours": row[4],
+                "arrival_time": row[5],
+                "end_time": row[6]
+            } for row in await cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"Ошибка получения чек-инов пользователя: {str(e)}")
+        return []
+
+async def deactivate_all_checkins(user_id: int) -> None:
+    """Деактивирует все активные чекины пользователя"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            await conn.execute('''
+                UPDATE checkins 
+                SET active = 0 
+                WHERE user_id = ? AND active = 1
+            ''', (user_id,))
+            await conn.commit()
+    except Exception as e:
+        logger.error(f"Ошибка деактивации чек-инов: {str(e)}")
+        raise
+
+
 # Блок 5: Избранные споты
 async def add_favorite_spot(user_id: int, spot_id: int) -> None:
     """Добавление спота в избранное"""
@@ -287,25 +380,32 @@ async def get_checkins_for_spot(spot_id: int) -> tuple:
     """Статистика по споту"""
     try:
         async with aiosqlite.connect(DB_PATH) as conn:
-            # Активные чекины
+            # Активные чекины с именами пользователей
             cursor = await conn.execute('''
-                SELECT COUNT(*) FROM checkins 
-                WHERE spot_id = ? AND checkin_type = 1 AND active = 1
+                SELECT u.first_name 
+                FROM checkins c
+                JOIN users u ON c.user_id = u.user_id
+                WHERE c.spot_id = ? 
+                AND c.checkin_type = 1 
+                AND c.active = 1
             ''', (spot_id,))
-            active_count = (await cursor.fetchone())[0]
+            active_users = [{"first_name": row[0]} for row in await cursor.fetchall()]
 
             # Планирующие прибытие
             cursor = await conn.execute('''
-                SELECT user_id, arrival_time FROM checkins 
-                WHERE spot_id = ? AND checkin_type = 2 AND active = 1
+                SELECT u.first_name, c.arrival_time 
+                FROM checkins c
+                JOIN users u ON c.user_id = u.user_id
+                WHERE c.spot_id = ? 
+                AND c.checkin_type = 2 
+                AND c.active = 1
             ''', (spot_id,))
-            arriving = [{"user_id": row[0], "arrival_time": row[1]} 
-                        for row in await cursor.fetchall()]
+            arriving = [{"first_name": row[0], "arrival_time": row[1]} for row in await cursor.fetchall()]
 
-            return active_count, arriving
+            return len(active_users), active_users, arriving
     except Exception as e:
         logger.error(f"Ошибка получения статистики: {str(e)}")
-        return 0, []
+        return 0, [], []
     
 # Инициализация базы данных (вызывается при старте бота)
 # Вызов перенесён в bot.py, так как это асинхронная функция

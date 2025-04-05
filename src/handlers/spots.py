@@ -85,8 +85,8 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     # Фильтруем споты с активными чек-инами
     active_spots = []
     for spot in spots:
-        on_spot_count, on_spot_users, arriving_users = await get_checkins_for_spot(spot["id"])
-        if on_spot_count > 0 or len(arriving_users) > 0:  # Есть кто-то на месте или планирующие приехать
+        active_count, active_users, arriving_users = await get_checkins_for_spot(spot["id"])  # Распаковка трёх значений
+        if active_count > 0 or len(arriving_users) > 0:  # Исправлено условие
             distance = haversine_distance(user_lat, user_lon, spot["lat"], spot["lon"])
             active_spots.append((spot, distance))
 
@@ -109,8 +109,8 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     # Формируем ответ
     response = "🔍 **Активные споты:**\n\n"
     for spot, distance in nearest_active_spots:
-        on_spot_count, on_spot_users, arriving_users = await get_checkins_for_spot(spot["id"])
-        on_spot_names = ", ".join(user["first_name"] for user in on_spot_users) if on_spot_users else "никого"
+        active_count, active_users, arriving_users = await get_checkins_for_spot(spot["id"])  # Распаковка трёх значений
+        on_spot_names = ", ".join(user["first_name"] for user in active_users) if active_users else "никого"
 
         arriving_info = "нет"
         if arriving_users:
@@ -142,7 +142,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
             f"📍 *Расстояние:* {distance:.2f} км\n"
             f"{wind_info}\n"
             f"{temp_info}\n"
-            f"👥 *На месте:* {on_spot_count} чел. ({on_spot_names})\n"
+            f"👥 *На месте:* {active_count} чел. ({on_spot_names})\n"
             f"⏳ *Приедут:* {len(arriving_users)} чел. ({arriving_info})\n\n"
         )
 
@@ -217,7 +217,8 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
     spot_id = data["spot_id"]
     user_id = callback.from_user.id
 
-    await checkin_user(user_id, spot_id, checkin_type=2, bot=bot, arrival_time=arrival_time)
+    # Удаляем параметр bot=bot из вызова функции checkin_user
+    await checkin_user(user_id, spot_id, checkin_type=2, arrival_time=arrival_time)
     spot = await get_spot_by_id(spot_id)
     await callback.message.edit_text(f"✅ Вы запланировали приезд на спот '{spot['name']}'! 🌊")
 
