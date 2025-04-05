@@ -127,6 +127,41 @@ async def push_database_to_github():
     except Exception as e:
         logging.error(f"❌ Ошибка при отправке базы данных в GitHub: {e}")
 
+async def check_pending_arrivals(bot: Bot):
+    """Проверка неподтверждённых записей о прибытии"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            cursor = await conn.cursor()
+            current_time = datetime.utcnow().isoformat()
+            
+            # Ищем просроченные записи типа 2
+            await cursor.execute("""
+                SELECT id, user_id, spot_id, arrival_time 
+                FROM checkins 
+                WHERE checkin_type = 2 
+                AND arrival_time < ?
+            """, (current_time,))
+            
+            for checkin_id, user_id, spot_id, arrival_time in await cursor.fetchall():
+                try:
+                    # Отправляем уведомление
+                    spot = await get_spot_by_id(spot_id)
+                    await bot.send_message(
+                        chat_id=user_id,
+                        text=f"⏳ Вы планировали прибыть к {arrival_time}. Подтвердите прибытие:",
+                        reply_markup=create_arrival_confirmation_keyboard()
+                    )
+                    
+                    # Удаляем старую запись
+                    await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
+                    
+                except Exception as e:
+                    logging.error(f"Ошибка обработки: {str(e)}")
+                    
+            await conn.commit()
+    except Exception as e:
+        logging.error(f"Ошибка проверки прибытий: {str(e)}")
+
 def start_scheduler(bot=None):
     """Запускает планировщик задач."""
     # Проверяем истёкшие чек-ины каждые 5 минут
@@ -134,6 +169,8 @@ def start_scheduler(bot=None):
     
     # Отправляем базу данных в GitHub каждые 15 минут
     scheduler.add_job(push_database_to_github, "interval", seconds=900)
+    
+    scheduler.add_job(check_pending_arrivals, "interval", seconds=600, args=[bot])
     
     scheduler.start()
     logging.info("✅ Планировщик задач запущен.")

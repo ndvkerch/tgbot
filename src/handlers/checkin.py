@@ -72,6 +72,13 @@ def create_arrival_time_keyboard() -> InlineKeyboardMarkup:
     ])
     return keyboard
 
+def create_arrival_confirmation_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для подтверждения прибытия"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я на месте", callback_data="late_arrival_confirm")],
+        [InlineKeyboardButton(text="🚪 Отмена", callback_data="cancel_late_arrival")]
+    ])
+
 # Блок 2: Обработчики для процесса чек-ина
 @checkin_router.callback_query(F.data == "checkin")
 async def process_checkin(callback: types.CallbackQuery, state: FSMContext):
@@ -312,6 +319,14 @@ async def plan_to_arrive(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Выберите время прибытия:", reply_markup=keyboard)
     await state.set_state(CheckinState.setting_arrival_time)
     await callback.answer()    
+
+@checkin_router.callback_query(F.data == "late_arrival_confirm")
+async def handle_late_arrival(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка позднего подтверждения"""
+    user_id = callback.from_user.id
+    await callback.message.answer("Выберите продолжительность пребывания:", 
+                               reply_markup=create_duration_keyboard())
+    await state.set_state(CheckinState.setting_duration)
 
 # Блок 3: Обработчики для редактирования и удаления спотов (для админов)
 @checkin_router.callback_query(F.data.startswith("edit_spot_"))
