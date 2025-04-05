@@ -49,6 +49,15 @@ def create_spot_keyboard(spots: list, is_admin: bool) -> InlineKeyboardMarkup:
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")])  # Новая кнопка
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def create_checkin_type_keyboard() -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру для выбора типа чек-ина."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Я на споте", callback_data="checkin_type_1")],
+        [InlineKeyboardButton(text="Планирую приехать", callback_data="checkin_type_2")],
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="cancel_checkin")]
+    ])
+    return keyboard
+
 def create_duration_keyboard() -> InlineKeyboardMarkup:
     """Создаёт клавиатуру для выбора длительности пребывания."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
