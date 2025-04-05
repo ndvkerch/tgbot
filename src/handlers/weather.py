@@ -83,30 +83,30 @@ async def process_location_for_weather_spots(message: types.Message, state: FSMC
             arriving_info_list = []
             for user in arriving_users:
                 arrival_time_str = user["arrival_time"]
-                if "T" not in arrival_time_str:  # Для старых записей
+                if "T" not in arrival_time_str:
                     arrival_time_str = f"{datetime.utcnow().date()}T{arrival_time_str}+00:00"
                 utc_time = datetime.fromisoformat(arrival_time_str.replace("Z", "+00:00"))
                 local_time = utc_time.replace(tzinfo=pytz.utc).astimezone(user_timezone)
                 arriving_info_list.append(f"{user['first_name']} ({local_time.strftime('%H:%M')})")
             arriving_info = ", ".join(arriving_info_list)
 
-        # Получаем данные о ветре и температуре
+        # Получаем данные о ветре и температуре воды
         wind_data = await get_windy_forecast(spot["lat"], spot["lon"])
         wind_info = "🌬 *Ветер:* Данные недоступны."
-        temp_info = "🌡 *Температура:* Данные недоступны."
+        water_info = "💧 *Вода:* Данные недоступны."
         if wind_data:
             wind_speed = wind_data["speed"]
             wind_direction = wind_data["direction"]
             direction_text = wind_direction_to_text(wind_direction)
             wind_info = f"🌬 *Ветер:* {wind_speed:.1f} м/с, {direction_text} ({wind_direction:.0f}°)"
-            if "temperature" in wind_data:
-                temp_info = f"🌡 *Вода:* {wind_data['temperature']:.1f} °C"
+            if "water_temperature" in wind_data and wind_data["water_temperature"] is not None:
+                water_info = f"💧 *Вода:* {wind_data['water_temperature']:.1f} °C"
 
         response += (
             f"🏄‍♂️ **{spot['name']}**\n"
             f"📍 *Расстояние:* {distance:.2f} км\n"
             f"{wind_info}\n"
-            f"{temp_info}\n"
+            f"{water_info}\n"
             f"👥 *На месте:* {on_spot_count} чел. ({on_spot_names})\n"
             f"⏳ *Приедут:* {len(arriving_users)} чел. ({arriving_info})\n\n"
         )

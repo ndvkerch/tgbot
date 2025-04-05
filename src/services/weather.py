@@ -6,73 +6,73 @@ from config import WINDY_API_KEY
 
 logging.basicConfig(level=logging.INFO)
 
-@cached(ttl=600)  # Кэшируем данные на 10 минут
+@cached(ttl=600)
 async def get_windy_forecast(lat: float, lon: float) -> dict:
     """
-    Получает прогноз ветра и температуры с Windy API по координатам спота.
+    Получает прогноз ветра с Windy API и температуру воды с Open-Meteo.
     
     Args:
         lat (float): Широта спота.
         lon (float): Долгота спота.
     
     Returns:
-        dict: Данные о ветре (скорость в м/с и направление в градусах) и температуре (в °C) или None в случае ошибки.
+        dict: Данные о ветре (скорость и направление) и температуре воды (°C).
     """
-    url = "https://api.windy.com/api/point-forecast/v2"
-    payload = {
+    # Windy API для ветра
+    url_windy = "https://api.windy.com/api/point-forecast/v2"
+    payload_windy = {
         "lat": lat,
         "lon": lon,
         "model": "gfs",
-        "parameters": ["wind", "temp"],  # Добавляем "temp" для температуры
-        "levels": ["surface"],          # Уровень поверхности
-        "key": WINDY_API_KEY
+        "parameters": ["wind"],
+        "levels": ["surface"],
+        "key": "heFO2edu6fB07DR8Rk94Hu1MDc5XSQH2"
     }
+    
+    # Open-Meteo для температуры воды
+    url_openmeteo = f"https://marine-api.open-meteo.com/v1/marine?latitude={lat}&longitude={lon}&hourly=sea_surface_temperature"
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as response:
-                if response.status != 200:
-                    logging.error(f"Ошибка Windy API: статус {response.status}, текст: {await response.text()}")
+            # Запрос к Windy для ветра
+            async with session.post(url_windy, json=payload_windy) as response_windy:
+                if response_windy.status != 200:
+                    logging.error(f"Ошибка Windy API: {await response_windy.text()}")
                     return None
+                windy_data = await response_windy.json()
                 
-                data = await response.json()
-                
-                # Проверка наличия всех нужных ключей
-                required_keys = ["wind_u-surface", "wind_v-surface", "temp-surface"]
-                if all(key in data for key in required_keys):
-                    # Компоненты ветра
-                    u = data["wind_u-surface"][0]  # м/с, восток-запад
-                    v = data["wind_v-surface"][0]  # м/с, север-юг
-                    # Температура
-                    temp_kelvin = data["temp-surface"][0]  # Кельвины
-                    
-                    # Скорость ветра (м/с)
+                if "wind_u-surface" in windy_data and "wind_v-surface" in windy_data:
+                    u = windy_data["wind_u-surface"][0]
+                    v = windy_data["wind_v-surface"][0]
                     wind_speed = math.sqrt(u**2 + v**2)
-                    
-                    # Направление ветра (градусы)
                     wind_direction_rad = math.atan2(v, u)
                     wind_direction_deg = math.degrees(wind_direction_rad)
-                    # Корректировка для метеорологической системы: 0° — север, 90° — восток
                     wind_direction = (270 - wind_direction_deg) % 360
-                    
-                    # Температура в Цельсиях
-                    temp_celsius = temp_kelvin - 273.15
-                    
-                    return {
-                        "speed": wind_speed,        # м/с
-                        "direction": wind_direction, # градусы
-                        "temperature": temp_celsius  # °C
-                    }
                 else:
-                    missing = [key for key in required_keys if key not in data]
-                    logging.error(f"Отсутствуют ключи в ответе Windy API: {missing}")
+                    logging.error("Отсутствуют данные о ветре")
                     return None
+
+            # Запрос к Open-Meteo для температуры воды
+            async with session.get(url_openmeteo) as response_openmeteo:
+                if response_openmeteo.status != 200:
+                    logging.error(f"Ошибка Open-Meteo API: {await response_openmeteo.text()}")
+                    return None
+                openmeteo_data = await response_openmeteo.json()
+                water_temp = openmeteo_data["hourly"]["sea_surface_temperature"][0]
+                if water_temp is None:
+                    logging.warning(f"Температура воды недоступна для ({lat}, {lon})")
+
+        return {
+            "speed": wind_speed,
+            "direction": wind_direction,
+            "water_temperature": water_temp  # None, если данные отсутствуют
+        }
     except Exception as e:
-        logging.error(f"Ошибка при запросе к Windy API: {e}")
+        logging.error(f"Ошибка при запросе: {e}")
         return None
 
 def wind_direction_to_text(degrees: float) -> str:
-    """Преобразует направление ветра в текстовую форму (например, 'Северный')."""
+    """Преобразует направление ветра в текстовую форму."""
     directions = ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"]
     index = round(degrees / 45) % 8
     return directions[index]
