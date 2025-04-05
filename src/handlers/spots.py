@@ -135,7 +135,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
             wind_info = f"🌬 *Ветер:* {wind_speed:.1f} м/с, {direction_text} ({wind_direction:.0f}°)"
             # Добавляем температуру, если она доступна
             if "temperature" in wind_data:
-                temp_info = f"🌡 *Температура:* {wind_data['temperature']:.1f} °C"
+                temp_info = f"🌡 *Вода:* {wind_data['temperature']:.1f} °C"
 
         response += (
             f"🏄‍♂️ **{spot['name']}**\n"
