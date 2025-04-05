@@ -124,18 +124,24 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
                 arriving_info_list.append(f"{user['first_name']} ({local_time.strftime('%H:%M')})")
             arriving_info = ", ".join(arriving_info_list)
 
+        # Получаем данные о ветре и температуре
         wind_data = await get_windy_forecast(spot["lat"], spot["lon"])
         wind_info = "🌬 *Ветер:* Данные недоступны."
+        temp_info = "🌡 *Температура:* Данные недоступны."
         if wind_data:
             wind_speed = wind_data["speed"]
             wind_direction = wind_data["direction"]
             direction_text = wind_direction_to_text(wind_direction)
             wind_info = f"🌬 *Ветер:* {wind_speed:.1f} м/с, {direction_text} ({wind_direction:.0f}°)"
+            # Добавляем температуру, если она доступна
+            if "temperature" in wind_data:
+                temp_info = f"🌡 *Температура:* {wind_data['temperature']:.1f} °C"
 
         response += (
             f"🏄‍♂️ **{spot['name']}**\n"
             f"📍 *Расстояние:* {distance:.2f} км\n"
             f"{wind_info}\n"
+            f"{temp_info}\n"
             f"👥 *На месте:* {on_spot_count} чел. ({on_spot_names})\n"
             f"⏳ *Приедут:* {len(arriving_users)} чел. ({arriving_info})\n\n"
         )
