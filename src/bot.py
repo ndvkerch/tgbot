@@ -14,6 +14,7 @@ from handlers.start import start_router
 from handlers.checkin import checkin_router
 from handlers.profile import profile_router
 from handlers.spots import spots_router
+from handlers.weather import weather_router
 
 # Импортируем планировщик задач
 from scheduler import start_scheduler
@@ -37,6 +38,7 @@ dp.include_router(start_router)
 dp.include_router(checkin_router)
 dp.include_router(profile_router)
 dp.include_router(spots_router)
+dp.include_router(weather_router)
 
 # Блок 4: Основная функция запуска
 async def main():
