@@ -23,7 +23,7 @@ async def get_open_meteo_forecast(lat: float, lon: float) -> dict:
               Если данные недоступны, возвращается None.
     """
     # Эндпоинт Open‑Meteo для текущего прогноза ветра (timezone=auto для определения местного времени)
-    url_wind = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&timezone=auto"
+    url_wind = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms&timezone=auto"
     
     # Эндпоинт Open‑Meteo Marine API для температуры воды
     url_water = f"https://marine-api.open-meteo.com/v1/marine?latitude={lat}&longitude={lon}&hourly=sea_surface_temperature"
