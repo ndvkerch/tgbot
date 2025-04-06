@@ -9,7 +9,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database import get_spots, get_spot_by_id, get_active_checkin, get_checkins_for_spot, checkin_user, get_user, add_or_update_user
-from services.weather import get_windy_forecast, wind_direction_to_text
+from services.weather import get_open_meteo_forecast as get_windy_forecast, wind_direction_to_text
 
 logging.basicConfig(level=logging.INFO)
 spots_router = Router()
@@ -134,8 +134,8 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
             direction_text = wind_direction_to_text(wind_direction)
             wind_info = f"🌬 *Ветер:* {wind_speed:.1f} м/с, {direction_text} ({wind_direction:.0f}°)"
             # Добавляем температуру, если она доступна
-            if "temperature" in wind_data:
-                temp_info = f"🌡 *Вода:* {wind_data['temperature']:.1f} °C"
+            if "water_temperature" in wind_data and wind_data["water_temperature"] is not None:
+                temp_info = f"🌡 *Вода:* {wind_data['water_temperature']:.1f} °C"
 
         response += (
             f"🏄‍♂️ **{spot['name']}**\n"
