@@ -4,6 +4,7 @@ import os
 import pytz
 from datetime import datetime, timedelta
 from dateutil import parser
+from aiogram import Bot
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -206,7 +207,8 @@ async def checkin_user(
     spot_id: int,
     checkin_type: int,
     duration_hours: float = None,
-    arrival_time: str = None
+    arrival_time: str = None,
+    bot: Bot = None
 ) -> None:
     """Создание чекина с учётом часового пояса"""
     try:
@@ -241,7 +243,18 @@ async def checkin_user(
                 end_time
             ))
             await conn.commit()
-    except Exception as e:
+
+        # Уведомления внутри блока try
+        if bot:
+            await notify_favorite_users(
+                spot_id=spot_id,
+                checkin_user_id=user_id,
+                bot=bot,
+                checkin_type=checkin_type,
+                arrival_time=arrival_time
+            )
+
+    except Exception as e:  # Блок except закрывает try
         logger.error(f"Ошибка создания чекина: {str(e)}")
         raise
 
@@ -374,6 +387,49 @@ async def remove_favorite_spot(user_id: int, spot_id: int) -> None:
     except Exception as e:
         logger.error(f"Ошибка удаления из избранного: {str(e)}")
         raise
+
+async def notify_favorite_users(
+    spot_id: int, 
+    checkin_user_id: int, 
+    bot: Bot,
+    checkin_type: int,  # Добавляем тип чекина
+    arrival_time: str = None  # Добавляем время прибытия
+) -> None:
+    """Отправляет уведомления в зависимости от типа чекина."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            cursor = await conn.execute('''
+                SELECT user_id FROM favorite_spots WHERE spot_id = ?
+            ''', (spot_id,))
+            users = [row[0] for row in await cursor.fetchall()]
+
+        checkin_user = await get_user(checkin_user_id)
+        spot = await get_spot_by_id(spot_id)
+
+        for user_id in users:
+            if user_id == checkin_user_id:
+                continue
+            
+            # Формируем текст уведомления
+            if checkin_type == 1:
+                text = f"🤙 Пользователь {checkin_user['first_name']} отметился на вашем избранном споте: {spot['name']}!"
+            elif checkin_type == 2 and arrival_time:
+                # Конвертируем время в локальный часовой пояс получателя
+                user = await get_user(user_id)
+                tz = pytz.timezone(user['timezone'])
+                utc_time = datetime.fromisoformat(arrival_time)
+                local_time = utc_time.astimezone(tz).strftime("%H:%M %d.%m.%Y")
+                text = f"⏱ Пользователь {checkin_user['first_name']} планирует приехать на спот {spot['name']} в {local_time}!"
+            else:
+                continue
+
+            try:
+                await bot.send_message(chat_id=user_id, text=text)
+                logger.info(f"Уведомление отправлено пользователю {user_id}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки: {e}")
+    except Exception as e:
+        logger.error(f"Ошибка в уведомлениях: {e}")
 
 # Блок 6: Дополнительные функции
 async def get_checkins_for_spot(spot_id: int) -> tuple:

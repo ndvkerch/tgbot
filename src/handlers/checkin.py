@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
@@ -172,7 +172,7 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot
     user_id = callback.from_user.id
 
     # Выполняем чек-ин
-    await checkin_user(user_id, spot_id, checkin_type=1, duration_hours=duration_hours)
+    await checkin_user(user_id, spot_id, checkin_type=1, duration_hours=duration_hours, bot=bot)
     
     # Получаем информацию о споте для отображения на карте
     spot = await get_spot_by_id(spot_id)
@@ -196,9 +196,8 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot
 async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     """Обрабатываем время прибытия и выполняем чек-ин."""
     arrival_str = callback.data.split("_")[1]
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)  # Aware-объект в UTC
     
-    # Теперь arrival_str может быть только "1", "2" или "3"
     arrival_time = (now + timedelta(hours=int(arrival_str))).isoformat()
 
     data = await state.get_data()
@@ -206,8 +205,8 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
     user_id = callback.from_user.id
 
     # Выполняем чек-ин с типом "Планирую приехать"
-    await checkin_user(user_id, spot_id, checkin_type=2, arrival_time=arrival_time)
-    
+    await checkin_user(user_id, spot_id, checkin_type=2, arrival_time=arrival_time, bot=bot)
+
     # Получаем информацию о споте для отображения на карте
     spot = await get_spot_by_id(spot_id)
     await callback.message.edit_text(f"\u2705 Вы запланировали приезд на спот '{spot['name']}'! 🌊")
