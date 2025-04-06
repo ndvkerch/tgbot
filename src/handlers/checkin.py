@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database import get_spots, add_spot, checkin_user, get_active_checkin, get_spot_by_id, update_checkin_to_arrived, update_spot_name, update_spot_location, delete_spot, checkout_user, get_user, add_or_update_user
 from keyboards import get_main_keyboard  # Импортируем динамическую клавиатуру
+from database import deactivate_all_checkins, checkin_user, get_user
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -171,7 +172,7 @@ async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot
     user_id = callback.from_user.id
 
     # Выполняем чек-ин
-    await checkin_user(user_id, spot_id, checkin_type=1, bot=bot, duration_hours=duration_hours)
+    await checkin_user(user_id, spot_id, checkin_type=1, duration_hours=duration_hours)
     
     # Получаем информацию о споте для отображения на карте
     spot = await get_spot_by_id(spot_id)
@@ -205,7 +206,7 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
     user_id = callback.from_user.id
 
     # Выполняем чек-ин с типом "Планирую приехать"
-    await checkin_user(user_id, spot_id, checkin_type=2, bot=bot, arrival_time=arrival_time)
+    await checkin_user(user_id, spot_id, checkin_type=2, arrival_time=arrival_time)
     
     # Получаем информацию о споте для отображения на карте
     spot = await get_spot_by_id(spot_id)
@@ -224,28 +225,19 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
 
 @checkin_router.callback_query(F.data == "confirm_arrival")
 async def confirm_arrival(callback: types.CallbackQuery, state: FSMContext):
-    """Пользователь подтверждает, что приехал на спот."""
-    user_id = callback.from_user.id
-    active_checkin = await get_active_checkin(user_id)
-    if not active_checkin or active_checkin["checkin_type"] != 2:
-        await callback.message.edit_text("❌ У вас нет запланированного чек-ина.")
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
-            ]
-        )
-        await callback.message.answer("Вернитесь в меню:", reply_markup=keyboard)
-        await state.clear()
-        await callback.answer()
-        return
-
-    # Сохраняем checkin_id и spot_id в состоянии
-    await state.update_data(checkin_id=active_checkin["id"], spot_id=active_checkin["spot_id"])
-    await callback.message.edit_text("Сколько вы планируете здесь находиться?")
-    keyboard = create_duration_keyboard()
-    await callback.message.answer("Выберите длительность:", reply_markup=keyboard)
-    await state.set_state(CheckinState.confirming_arrival)
-    await callback.answer()
+    """Подтверждение прибытия и переход к выбору спота"""
+    try:
+        user_id = callback.from_user.id
+        
+        # Деактивируем все предыдущие чекины (планирование)
+        await deactivate_all_checkins(user_id)
+        
+        # Запускаем стандартный процесс чекина
+        await process_checkin(callback, state)
+        
+    except Exception as e:
+        logging.error(f"Ошибка подтверждения прибытия: {e}")
+        await callback.answer("❌ Произошла ошибка. Попробуйте снова.")
 
 @checkin_router.callback_query(F.data.startswith("duration_"), CheckinState.confirming_arrival)
 async def process_arrival_duration(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
