@@ -40,15 +40,16 @@ def get_file_hash(file_path: str) -> str:
     return hasher.hexdigest()
 
 async def check_expired_checkins(bot=None):
-    """Проверяет истёкшие чек-ины, разчекивает пользователей и отправляет уведомления."""
+    """Проверяет истёкшие чек-ины для пользователей, которые уже на споте (checkin_type=1)."""
     try:
         async with aiosqlite.connect(DB_PATH) as conn:
             cursor = await conn.cursor()
             current_time = datetime.utcnow().isoformat()
+            # Добавляем условие checkin_type=1
             await cursor.execute("""
                 SELECT id, user_id, spot_id
                 FROM checkins
-                WHERE active = 1 AND end_time IS NOT NULL AND end_time < ?
+                WHERE active = 1 AND checkin_type = 1 AND end_time IS NOT NULL AND end_time < ?
             """, (current_time,))
             expired_checkins = await cursor.fetchall()
             

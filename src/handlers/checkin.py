@@ -323,10 +323,15 @@ async def plan_to_arrive(callback: types.CallbackQuery, state: FSMContext):
 
 @checkin_router.callback_query(F.data == "late_arrival_confirm")
 async def handle_late_arrival(callback: types.CallbackQuery, state: FSMContext):
-    """Обработка позднего подтверждения"""
+    """Обработка позднего подтверждения: пользователь подтверждает прибытие."""
     user_id = callback.from_user.id
-    await callback.message.answer("Выберите продолжительность пребывания:", 
-                               reply_markup=create_duration_keyboard())
+    # Деактивируем все предыдущие чек-ины (планирование)
+    await deactivate_all_checkins(user_id)
+    
+    # Запрашиваем длительность пребывания
+    await callback.message.edit_text("Выберите продолжительность пребывания:")
+    keyboard = create_duration_keyboard()
+    await callback.message.answer("Выберите длительность:", reply_markup=keyboard)
     await state.set_state(CheckinState.setting_duration)
 
 # Блок 3: Обработчики для редактирования и удаления спотов (для админов)
@@ -468,6 +473,20 @@ async def cancel_delete_spot(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
         await state.set_state(CheckinState.adding_spot)
+    await callback.answer()
+
+@checkin_router.callback_query(F.data == "cancel_late_arrival")
+async def cancel_late_arrival(callback: types.CallbackQuery, state: FSMContext):
+    """Пользователь передумал приезжать на спот."""
+    user_id = callback.from_user.id
+    await callback.message.edit_text("❌ Вы отменили прибытие на спот.")
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
+        ]
+    )
+    await callback.message.answer("Вернитесь в меню:", reply_markup=keyboard)
+    await state.clear()
     await callback.answer()
 
 # Блок 4: Обработчики для добавления нового спота
