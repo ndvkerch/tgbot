@@ -1,11 +1,12 @@
 import logging
+import aiosqlite
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from database import get_spots, add_spot, checkin_user, get_active_checkin, get_spot_by_id, update_checkin_to_arrived, update_spot_name, update_spot_location, delete_spot, checkout_user, get_user, add_or_update_user
+from database import DB_PATH, get_spots, add_spot, checkin_user, get_active_checkin, get_spot_by_id, update_checkin_to_arrived, update_spot_name, update_spot_location, delete_spot, checkout_user, get_user, add_or_update_user
 from keyboards import get_main_keyboard  # Импортируем динамическую клавиатуру
 from database import deactivate_all_checkins, checkin_user, get_user
 

@@ -96,7 +96,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     if not nearest_active_spots:
         # Если нет активных спотов, показываем сообщение с шуткой
         await message.answer(
-            "🌬️🚫🔍 На спотах активность не обнаружена! 🚗📍🤔 Приехал на спот и решил остаться? 📢📍🤙 Дай знать — отметь себя на споте! 🌍👥🌪️🪁 Все будут знать, где сегодня вкатывают.",
+            "🌬️🚫🔍 На спотах активность не обнаружена! 🚗📍🤔 Собрался или приехал на спот и решил остаться? 📢📍🤙 Дай знать — отметь себя на споте! 🌍👥🌪️🪁 Все будут знать, где сегодня вкатывают.",
             reply_markup=ReplyKeyboardRemove()
         )
         keyboard = InlineKeyboardMarkup(
