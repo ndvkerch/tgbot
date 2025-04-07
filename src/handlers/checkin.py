@@ -1,5 +1,6 @@
 import logging
 import aiosqlite
+import pytz
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Router, types, F
@@ -8,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database import DB_PATH, get_spots, add_spot, checkin_user, get_active_checkin, get_spot_by_id, update_checkin_to_arrived, update_spot_name, update_spot_location, delete_spot, checkout_user, get_user, add_or_update_user
 from keyboards import get_main_keyboard  # Импортируем динамическую клавиатуру
-from database import deactivate_all_checkins, checkin_user, get_user
+from database import deactivate_all_checkins, checkin_user, get_user, notify_favorite_users
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -148,12 +149,37 @@ async def select_checkin_type(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @checkin_router.callback_query(F.data == "checkin_type_1")
-async def checkin_type_1(callback: types.CallbackQuery, state: FSMContext):
-    """Пользователь выбрал 'Я уже на споте', запрашиваем длительность."""
-    await callback.message.edit_text("Сколько вы планируете здесь находиться?")
-    keyboard = create_duration_keyboard()
-    await callback.message.answer("Выберите длительность:", reply_markup=keyboard)
-    await state.set_state(CheckinState.setting_duration)
+async def checkin_type_1(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    spot_id = data.get("spot_id")
+    user_id = callback.from_user.id
+    
+    if not spot_id:
+        await callback.message.answer("❌ Спот не выбран. Пожалуйста, начните процесс заново.")
+        await state.clear()
+        await callback.answer()
+        return
+    
+    # Создаём запись в базе данных с checkin_type=1 и active=1
+    try:
+        checkin_id = await checkin_user(user_id, spot_id, checkin_type=1, bot=bot)
+        if not checkin_id:
+            raise ValueError("Checkin ID not returned")
+            
+        # Сохраняем checkin_id в состоянии
+        await state.update_data(checkin_id=checkin_id)
+        
+        # Отправляем сообщение с клавиатурой выбора продолжительности
+        keyboard = create_duration_keyboard()
+        await callback.message.edit_text("Сколько вы планируете здесь находиться?")
+        await callback.message.answer("Выберите длительность:", reply_markup=keyboard)
+        await state.set_state(CheckinState.setting_duration)
+        logger.info(f"Состояние установлено: setting_duration для пользователя {user_id}")
+
+    except Exception as e:
+        logger.error(f"Ошибка создания чекина: {str(e)}")
+        await callback.message.answer("❌ Не удалось создать запись чек-ина. Попробуйте позже.")
+    
     await callback.answer()
 
 @checkin_router.callback_query(F.data == "checkin_type_2")
@@ -168,54 +194,58 @@ async def checkin_type_2(callback: types.CallbackQuery, state: FSMContext):
 @checkin_router.callback_query(F.data.startswith("duration_"))
 async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
-    logger.info(f"process_duration: data = {data}")
-    
-    if "spot_id" not in data or "checkin_id" not in data:
-        logger.error(f"Ошибка: отсутствуют spot_id или checkin_id в состоянии для пользователя {callback.from_user.id}")
-        await callback.message.answer("❌ Ошибка: спот не выбран. Пожалуйста, начните процесс заново.")
-        await state.clear()
-        await callback.answer()
-        return
-    
-    duration_str = callback.data.split("_")[1]
-    duration_hours = int(duration_str)
-    spot_id = data["spot_id"]
-    checkin_id = data["checkin_id"]
     user_id = callback.from_user.id
-
-    # Обновляем существующую запись в базе
-    async with aiosqlite.connect(DB_PATH) as conn:
-        cursor = await conn.cursor()
-        end_time = (datetime.utcnow() + timedelta(hours=duration_hours)).isoformat()
-        await cursor.execute("""
-            UPDATE checkins 
-            SET checkin_type = 1, active = 1, end_time = ? 
-            WHERE id = ?
-        """, (end_time, checkin_id))
-        await conn.commit()
-        logger.info(f"Чек-ин {checkin_id} обновлён для пользователя {user_id} на споте {spot_id}, end_time={end_time}")
+    checkin_id = data.get("checkin_id")
     
-    # Получаем информацию о споте для отображения на карте
-    spot = await get_spot_by_id(spot_id)
-    if not spot:
-        logger.error(f"Спот {spot_id} не найден для пользователя {user_id}")
-        await callback.message.answer("❌ Ошибка: спот не найден.")
+    if not checkin_id:
+        await callback.answer("❌ Сессия устарела. Начните заново.")
         await state.clear()
-        await callback.answer()
         return
     
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
+    duration_hours = int(callback.data.split("_")[1])
+    
+    try:
+        # Обновляем запись
+        now = datetime.now(pytz.utc)
+        end_time = (now + timedelta(hours=duration_hours)).isoformat()
+        
+        async with aiosqlite.connect(DB_PATH) as conn:
+            # Активируем запись и добавляем данные
+            await conn.execute('''
+                UPDATE checkins 
+                SET 
+                    active = 1,
+                    end_time = ?,
+                    duration_hours = ?,
+                    timestamp = ?
+                WHERE id = ?
+            ''', (end_time, duration_hours, now.isoformat(), checkin_id))
+            await conn.commit()
+
+        # Отправляем уведомления только после активации
+        spot = await get_spot_by_id(data["spot_id"])
+        if bot:
+            await notify_favorite_users(
+                spot_id=spot["id"],
+                checkin_user_id=user_id,
+                bot=bot,
+                checkin_type=1,
+                arrival_time=None
+            )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🚪 Покинуть спот", callback_data="uncheckin")],
             [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
-        ]
-    )
-    await callback.message.edit_text(
-        f"\u2705 Вы отметились на споте '{spot['name']}'! 🌊",
-        reply_markup=keyboard
-    )
-    logger.info(f"Чек-ин завершён для пользователя {user_id} на споте '{spot['name']}'")
-    
+        ])
+        await callback.message.edit_text(
+            f"\u2705 Вы отметились на споте '{spot['name']}'! 🌊",
+            reply_markup=keyboard
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка обновления: {str(e)}")
+        await callback.answer("❌ Произошла ошибка")
+
     await state.clear()
     await callback.answer()
 
@@ -307,11 +337,34 @@ async def process_arrival_duration(callback: types.CallbackQuery, state: FSMCont
 
 @checkin_router.callback_query(F.data == "cancel_checkin")
 async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
-    """Отмена чек-ина, возвращение к выбору спота."""
-    spots = await get_spots() or []  # Добавляем await
+    """Отмена чек-ина: удаление неактивных записей и возврат к выбору спота."""
     user_id = callback.from_user.id
+    data = await state.get_data()
+    checkin_id = data.get("checkin_id")
+
+    # Удаляем запись, если она существует и end_time не задан
+    if checkin_id:
+        async with aiosqlite.connect(DB_PATH) as conn:
+            cursor = await conn.cursor()
+            # Проверяем, есть ли запись без end_time
+            await cursor.execute("""
+                SELECT id FROM checkins 
+                WHERE 
+                    id = ? 
+                    AND end_time IS NULL 
+                    AND active = 0
+            """, (checkin_id,))
+            result = await cursor.fetchone()
+            
+            if result:
+                await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
+                await conn.commit()
+                logger.info(f"Удалена временная запись чекина {checkin_id} для пользователя {user_id}")
+
+    # Возвращаемся к выбору спота
+    spots = await get_spots() or []
     if spots:
-        keyboard = create_spot_keyboard(spots, await is_admin(user_id))  # Добавляем await для is_admin
+        keyboard = create_spot_keyboard(spots, await is_admin(user_id))
         await callback.message.edit_text("Выберите спот:", reply_markup=keyboard)
         await state.set_state(CheckinState.choosing_spot)
     else:
@@ -323,6 +376,8 @@ async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
         await state.set_state(CheckinState.adding_spot)
+
+    await state.clear()
     await callback.answer()
 
 @checkin_router.callback_query(F.data == "plan_to_arrive")
