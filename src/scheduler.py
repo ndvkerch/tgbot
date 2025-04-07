@@ -183,19 +183,19 @@ async def check_pending_arrivals(bot: Bot):
                         reply_markup=create_arrival_confirmation_keyboard()
                     )
                     
-                    # Удаляем старую запись
-                    await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
+                    # Делаем запись неактивной вместо удаления
+                    await cursor.execute("UPDATE checkins SET active = 0 WHERE id = ?", (checkin_id,))
+                    logger.info(f"Чек-ин {checkin_id} для пользователя {user_id} помечен как неактивный")
                     
                 except pytz.exceptions.UnknownTimeZoneError as e:
                     logger.error(f"Некорректный часовой пояс для пользователя {user_id}: {user_tz}. Используется UTC.")
-                    # В случае ошибки используем UTC
                     formatted_time = datetime.fromisoformat(arrival_time).strftime("%H:%M")
                     await bot.send_message(
                         chat_id=user_id,
                         text=f"⏳ Вы планировали прибыть на спот '{spot['name']}' к {formatted_time} (UTC). Подтвердите прибытие:",
                         reply_markup=create_arrival_confirmation_keyboard()
                     )
-                    await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
+                    await cursor.execute("UPDATE checkins SET active = 0 WHERE id = ?", (checkin_id,))
                 except Exception as e:
                     logger.error(f"Ошибка обработки чек-ина {checkin_id} для пользователя {user_id}: {str(e)}")
                     
