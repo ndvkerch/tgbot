@@ -214,7 +214,8 @@ async def checkin_user(
     try:
         await deactivate_all_checkins(user_id)
         user = await get_user(user_id)
-        tz = pytz.timezone(user['timezone'])
+        tz_name = user.get('timezone', 'UTC')
+        tz = pytz.timezone(tz_name)
         
         timestamp = datetime.now(tz).astimezone(pytz.utc)
         end_time = None

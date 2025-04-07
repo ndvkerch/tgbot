@@ -6,12 +6,16 @@ import aiosqlite
 import subprocess
 import os
 import hashlib
+import pytz
 from dotenv import load_dotenv  # Импортируем для работы с .env
+from database import get_spot_by_id
+from handlers.checkin import create_arrival_confirmation_keyboard
 
 # Загружаем переменные из файла .env
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 DB_PATH = "data/database.db"
 
@@ -40,6 +44,7 @@ def get_file_hash(file_path: str) -> str:
     return hasher.hexdigest()
 
 async def check_expired_checkins(bot=None):
+    logger.info("Запуск check_expired_checkins")
     """Проверяет истёкшие чек-ины для пользователей, которые уже на споте (checkin_type=1)."""
     try:
         async with aiosqlite.connect(DB_PATH) as conn:
@@ -130,6 +135,7 @@ async def push_database_to_github():
         logging.error(f"❌ Ошибка при отправке базы данных в GitHub: {e}")
 
 async def check_pending_arrivals(bot: Bot):
+    logger.info("Запуск check_pending_arrivals")
     """Проверка неподтверждённых записей о прибытии"""
     try:
         async with aiosqlite.connect(DB_PATH) as conn:
@@ -146,23 +152,56 @@ async def check_pending_arrivals(bot: Bot):
             
             for checkin_id, user_id, spot_id, arrival_time in await cursor.fetchall():
                 try:
-                    # Отправляем уведомление
+                    # Получаем информацию о споте
                     spot = await get_spot_by_id(spot_id)
+                    if not spot:
+                        logger.warning(f"Спот с ID {spot_id} не найден для чек-ина {checkin_id}")
+                        await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
+                        continue
+                    
+                    # Получаем часовой пояс пользователя из таблицы users
+                    await cursor.execute("SELECT timezone FROM users WHERE user_id = ?", (user_id,))
+                    user_tz_result = await cursor.fetchone()
+                    
+                    # Если часовой пояс не указан, используем значение по умолчанию
+                    user_tz = user_tz_result[0] if user_tz_result and user_tz_result[0] else "Europe/Moscow"
+                    local_tz = pytz.timezone(user_tz)
+                    
+                    # Преобразуем arrival_time из ISO-формата в объект datetime
+                    arrival_dt = datetime.fromisoformat(arrival_time)
+                    
+                    # Переводим время в часовой пояс пользователя
+                    arrival_local = arrival_dt.astimezone(local_tz)
+                    
+                    # Форматируем время в читаемый вид (например, 14:00)
+                    formatted_time = arrival_local.strftime("%H:%M")
+                    
+                    # Отправляем уведомление с отформатированным временем
                     await bot.send_message(
                         chat_id=user_id,
-                        text=f"⏳ Вы планировали прибыть к {arrival_time}. Подтвердите прибытие:",
+                        text=f"⏳ Вы планировали прибыть на спот '{spot['name']}' к {formatted_time}. Подтвердите прибытие:",
                         reply_markup=create_arrival_confirmation_keyboard()
                     )
                     
                     # Удаляем старую запись
                     await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
                     
+                except pytz.exceptions.UnknownTimeZoneError as e:
+                    logger.error(f"Некорректный часовой пояс для пользователя {user_id}: {user_tz}. Используется UTC.")
+                    # В случае ошибки используем UTC
+                    formatted_time = datetime.fromisoformat(arrival_time).strftime("%H:%M")
+                    await bot.send_message(
+                        chat_id=user_id,
+                        text=f"⏳ Вы планировали прибыть на спот '{spot['name']}' к {formatted_time} (UTC). Подтвердите прибытие:",
+                        reply_markup=create_arrival_confirmation_keyboard()
+                    )
+                    await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
                 except Exception as e:
-                    logging.error(f"Ошибка обработки: {str(e)}")
+                    logger.error(f"Ошибка обработки чек-ина {checkin_id} для пользователя {user_id}: {str(e)}")
                     
             await conn.commit()
     except Exception as e:
-        logging.error(f"Ошибка проверки прибытий: {str(e)}")
+        logger.error(f"Ошибка проверки прибытий: {str(e)}")
 
 def start_scheduler(bot=None):
     """Запускает планировщик задач."""

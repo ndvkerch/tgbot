@@ -11,6 +11,7 @@ from database import deactivate_all_checkins, checkin_user, get_user
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 checkin_router = Router()
 
 # Определение состояний для FSM
@@ -131,6 +132,8 @@ async def select_checkin_type(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("❌ Спот не найден.")
         await callback.answer()
         return
+    await state.update_data(spot_id=spot_id)  # Сохраняем spot_id
+    await state.set_state(CheckinState.selecting_checkin_type)
 
     # Отправляем карту спота
     await callback.message.answer_location(latitude=spot["lat"], longitude=spot["lon"])
@@ -164,10 +167,17 @@ async def checkin_type_2(callback: types.CallbackQuery, state: FSMContext):
 @checkin_router.callback_query(F.data.startswith("duration_"))
 async def process_duration(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     """Обрабатываем длительность пребывания и выполняем чек-ин."""
+    data = await state.get_data()
+    logger.info(f"process_duration: data = {data}")
+    # Проверяем наличие ключа 'spot_id'
+    if "spot_id" not in data:
+        await callback.message.answer("❌ Ошибка: спот не выбран. Пожалуйста, начните процесс заново.")
+        await state.clear()
+        await callback.answer()
+        return
+    
     duration_str = callback.data.split("_")[1]
     duration_hours = int(duration_str)
-
-    data = await state.get_data()
     spot_id = data["spot_id"]
     user_id = callback.from_user.id
 
