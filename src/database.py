@@ -209,25 +209,20 @@ async def checkin_user(
     duration_hours: float = None,
     arrival_time: str = None,
     bot: Bot = None
-) -> None:
-    """Создание чекина с учётом часового пояса"""
+) -> int:
+    """Создание временной неактивной записи для чекина типа 1"""
     try:
         await deactivate_all_checkins(user_id)
         user = await get_user(user_id)
         tz_name = user.get('timezone', 'UTC')
         tz = pytz.timezone(tz_name)
         
-        timestamp = datetime.now(tz).astimezone(pytz.utc)
+        timestamp = datetime.now(pytz.utc)
         end_time = None
 
-        if checkin_type == 1 and duration_hours:
-            end_time = (timestamp + timedelta(hours=duration_hours)).isoformat()
-        elif checkin_type == 2 and arrival_time:
-            local_dt = parser.parse(arrival_time).replace(tzinfo=tz)
-            end_time = local_dt.astimezone(pytz.utc).isoformat()
-
         async with aiosqlite.connect(DB_PATH) as conn:
-            await conn.execute('''
+            cursor = await conn.cursor()
+            await cursor.execute('''
                 INSERT INTO checkins (
                     user_id, spot_id, timestamp, 
                     active, checkin_type, duration_hours, 
@@ -237,15 +232,20 @@ async def checkin_user(
                 user_id,
                 spot_id,
                 timestamp.isoformat(),
-                1,
+                0 if checkin_type == 1 else 1,  # Для типа 1 создаем неактивную запись
                 checkin_type,
                 duration_hours,
                 arrival_time,
                 end_time
             ))
             await conn.commit()
+            return cursor.lastrowid
 
-        # Уведомления внутри блока try
+    except Exception as e:
+        logger.error(f"Ошибка создания чекина: {str(e)}")
+        return None
+
+        # Уведомления
         if bot:
             await notify_favorite_users(
                 spot_id=spot_id,
@@ -255,9 +255,11 @@ async def checkin_user(
                 arrival_time=arrival_time
             )
 
-    except Exception as e:  # Блок except закрывает try
+        return checkin_id  # Возвращаем ID
+
+    except Exception as e:
         logger.error(f"Ошибка создания чекина: {str(e)}")
-        raise
+        return None
 
 async def get_active_checkin(user_id: int) -> dict:
     """Получение активного чекина"""
