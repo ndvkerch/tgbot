@@ -136,21 +136,26 @@ async def push_database_to_github():
 
 async def check_pending_arrivals(bot: Bot):
     logger.info("Запуск check_pending_arrivals")
-    """Проверка неподтверждённых записей о прибытии"""
+    """Проверка активных неподтверждённых записей о прибытии (checkin_type=2, active=1)."""
     try:
         async with aiosqlite.connect(DB_PATH) as conn:
             cursor = await conn.cursor()
             current_time = datetime.utcnow().isoformat()
             
-            # Ищем просроченные записи типа 2
+            # Ищем только активные просроченные записи типа 2
             await cursor.execute("""
                 SELECT id, user_id, spot_id, arrival_time 
                 FROM checkins 
                 WHERE checkin_type = 2 
+                AND active = 1 
                 AND arrival_time < ?
             """, (current_time,))
             
-            for checkin_id, user_id, spot_id, arrival_time in await cursor.fetchall():
+            expired_arrivals = await cursor.fetchall()
+            if not expired_arrivals:
+                logger.info("Нет активных просроченных записей о прибытии.")
+            
+            for checkin_id, user_id, spot_id, arrival_time in expired_arrivals:
                 try:
                     # Получаем информацию о споте
                     spot = await get_spot_by_id(spot_id)
@@ -168,10 +173,10 @@ async def check_pending_arrivals(bot: Bot):
                     local_tz = pytz.timezone(user_tz)
                     
                     # Преобразуем arrival_time из ISO-формата в объект datetime
-                    arrival_dt = datetime.fromisoformat(arrival_time)
+                    arrival_dt = datetime.fromisoformat(arrival_time.replace("Z", "+00:00"))
                     
                     # Переводим время в часовой пояс пользователя
-                    arrival_local = arrival_dt.astimezone(local_tz)
+                    arrival_local = arrival_dt.replace(tzinfo=pytz.utc).astimezone(local_tz)
                     
                     # Форматируем время в читаемый вид (например, 14:00)
                     formatted_time = arrival_local.strftime("%H:%M")
@@ -182,6 +187,7 @@ async def check_pending_arrivals(bot: Bot):
                         text=f"⏳ Вы планировали прибыть на спот '{spot['name']}' к {formatted_time}. Подтвердите прибытие:",
                         reply_markup=create_arrival_confirmation_keyboard()
                     )
+                    logger.info(f"Уведомление отправлено пользователю {user_id} для спота '{spot['name']}'")
                     
                     # Делаем запись неактивной вместо удаления
                     await cursor.execute("UPDATE checkins SET active = 0 WHERE id = ?", (checkin_id,))
@@ -189,7 +195,7 @@ async def check_pending_arrivals(bot: Bot):
                     
                 except pytz.exceptions.UnknownTimeZoneError as e:
                     logger.error(f"Некорректный часовой пояс для пользователя {user_id}: {user_tz}. Используется UTC.")
-                    formatted_time = datetime.fromisoformat(arrival_time).strftime("%H:%M")
+                    formatted_time = datetime.fromisoformat(arrival_time.replace("Z", "+00:00")).strftime("%H:%M")
                     await bot.send_message(
                         chat_id=user_id,
                         text=f"⏳ Вы планировали прибыть на спот '{spot['name']}' к {formatted_time} (UTC). Подтвердите прибытие:",
