@@ -106,8 +106,8 @@ async def push_database_to_github():
             subprocess.run(["git", "remote", "set-url", "origin", REPO_URL], check=True)
             logging.info("✅ URL репозитория настроен с использованием токена.")
 
-            # Добавляем файл в индекс
-            subprocess.run(["git", "add", DB_PATH], check=True)
+            # Принудительно добавляем файл в индекс (игнорируя .gitignore)
+            subprocess.run(["git", "add", "-f", DB_PATH], check=True)  # <-- ИЗМЕНЕНИЕ ЗДЕСЬ
             logging.info(f"✅ Файл {DB_PATH} добавлен в индекс Git.")
 
             # Проверяем, есть ли изменения для коммита
@@ -128,6 +128,7 @@ async def push_database_to_github():
 
         except subprocess.CalledProcessError as e:
             logging.error(f"❌ Ошибка при выполнении Git-команды: {e}")
+            logging.error(f"Вывод stderr: {e.stderr}")  # <-- ДОБАВИЛИ ДЕТАЛИЗАЦИЮ ОШИБОК
         except Exception as e:
             logging.error(f"❌ Неизвестная ошибка при работе с Git: {e}")
 

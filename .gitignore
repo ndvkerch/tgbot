@@ -1,6 +1,6 @@
 # Игнорируем виртуальное окружение
 venv/
-__pycache__/
+_pycache_/
 *.pyc
 *.pyo
 *.sqlite3
@@ -18,3 +18,4 @@ pip-delete-this-directory.txt
 
 # Docker файлы, которые не нужны в Git
 *.pid
+"data/database.db"
