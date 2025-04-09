@@ -142,7 +142,7 @@ async def check_pending_arrivals(bot: Bot):
             cursor = await conn.cursor()
             current_time = datetime.utcnow().isoformat()
             
-            # Ищем только активные просроченные записи типа 2
+            # Ищем активные просроченные записи типа 2
             await cursor.execute("""
                 SELECT id, user_id, spot_id, arrival_time 
                 FROM checkins 
@@ -153,7 +153,8 @@ async def check_pending_arrivals(bot: Bot):
             
             expired_arrivals = await cursor.fetchall()
             if not expired_arrivals:
-                logger.info("Нет активных просроченных записей о прибытии.")
+                logger.info("Нет активных просроченных записей о прибытии, требующих уведомления.")
+                return
             
             for checkin_id, user_id, spot_id, arrival_time in expired_arrivals:
                 try:
@@ -162,52 +163,56 @@ async def check_pending_arrivals(bot: Bot):
                     if not spot:
                         logger.warning(f"Спот с ID {spot_id} не найден для чек-ина {checkin_id}")
                         await cursor.execute("DELETE FROM checkins WHERE id = ?", (checkin_id,))
+                        await conn.commit()
                         continue
                     
-                    # Получаем часовой пояс пользователя из таблицы users
+                    # Получаем часовой пояс пользователя
                     await cursor.execute("SELECT timezone FROM users WHERE user_id = ?", (user_id,))
                     user_tz_result = await cursor.fetchone()
-                    
-                    # Если часовой пояс не указан, используем значение по умолчанию
                     user_tz = user_tz_result[0] if user_tz_result and user_tz_result[0] else "Europe/Moscow"
                     local_tz = pytz.timezone(user_tz)
                     
-                    # Преобразуем arrival_time из ISO-формата в объект datetime
+                    # Преобразуем arrival_time в локальное время пользователя
                     arrival_dt = datetime.fromisoformat(arrival_time.replace("Z", "+00:00"))
-                    
-                    # Переводим время в часовой пояс пользователя
                     arrival_local = arrival_dt.replace(tzinfo=pytz.utc).astimezone(local_tz)
-                    
-                    # Форматируем время в читаемый вид (например, 14:00)
                     formatted_time = arrival_local.strftime("%H:%M")
                     
-                    # Отправляем уведомление с отформатированным временем
+                    # Отправляем уведомление с checkin_id в клавиатуре
                     await bot.send_message(
                         chat_id=user_id,
                         text=f"⏳ Вы планировали прибыть на спот '{spot['name']}' к {formatted_time}. Подтвердите прибытие:",
-                        reply_markup=create_arrival_confirmation_keyboard()
+                        reply_markup=create_arrival_confirmation_keyboard(checkin_id)
                     )
-                    logger.info(f"Уведомление отправлено пользователю {user_id} для спота '{spot['name']}'")
+                    logger.info(f"Уведомление отправлено пользователю {user_id} для чек-ина {checkin_id}, спот '{spot['name']}'")
                     
-                    # Делаем запись неактивной вместо удаления
-                    await cursor.execute("UPDATE checkins SET active = 0 WHERE id = ?", (checkin_id,))
-                    logger.info(f"Чек-ин {checkin_id} для пользователя {user_id} помечен как неактивный")
+                    # Деактивируем запись после отправки уведомления
+                    await cursor.execute("""
+                        UPDATE checkins 
+                        SET active = 0 
+                        WHERE id = ?
+                    """, (checkin_id,))
+                    logger.info(f"Чек-ин {checkin_id} деактивирован (active=0)")
                     
-                except pytz.exceptions.UnknownTimeZoneError as e:
-                    logger.error(f"Некорректный часовой пояс для пользователя {user_id}: {user_tz}. Используется UTC.")
+                except pytz.exceptions.UnknownTimeZoneError as tz_error:
+                    logger.error(f"Некорректный часовой пояс для пользователя {user_id}: {user_tz}, ошибка: {str(tz_error)}")
                     formatted_time = datetime.fromisoformat(arrival_time.replace("Z", "+00:00")).strftime("%H:%M")
                     await bot.send_message(
                         chat_id=user_id,
                         text=f"⏳ Вы планировали прибыть на спот '{spot['name']}' к {formatted_time} (UTC). Подтвердите прибытие:",
-                        reply_markup=create_arrival_confirmation_keyboard()
+                        reply_markup=create_arrival_confirmation_keyboard(checkin_id)
                     )
-                    await cursor.execute("UPDATE checkins SET active = 0 WHERE id = ?", (checkin_id,))
+                    await cursor.execute("""
+                        UPDATE checkins 
+                        SET active = 0 
+                        WHERE id = ?
+                    """, (checkin_id,))
+                    logger.info(f"Чек-ин {checkin_id} деактивирован после ошибки часового пояса")
                 except Exception as e:
-                    logger.error(f"Ошибка обработки чек-ина {checkin_id} для пользователя {user_id}: {str(e)}")
-                    
-            await conn.commit()
+                    logger.error(f"Ошибка отправки уведомления для чек-ина {checkin_id}, пользователь {user_id}: {str(e)}")
+                
+                await conn.commit()
     except Exception as e:
-        logger.error(f"Ошибка проверки прибытий: {str(e)}")
+        logger.error(f"Ошибка в check_pending_arrivals: {str(e)}")
 
 def start_scheduler(bot=None):
     """Запускает планировщик задач."""

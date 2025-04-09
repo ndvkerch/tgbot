@@ -210,8 +210,38 @@ async def checkin_user(
     arrival_time: str = None,
     bot: Bot = None
 ) -> int:
-    """Создание временной неактивной записи для чекина типа 1"""
+    """
+    Создание записи для чек-ина пользователя.
+
+    Args:
+        user_id (int): ID пользователя
+        spot_id (int): ID спота
+        checkin_type (int): Тип чек-ина (1 или 2)
+        duration_hours (float, optional): Длительность в часах
+        arrival_time (str, optional): Время прибытия в формате ISO
+        bot (Bot, optional): Экземпляр бота для уведомлений
+
+    Returns:
+        int: ID созданного чек-ина или None в случае ошибки
+    """
+    # Логирование начала выполнения функции
+    logger.info(f"Начало создания чек-ина для пользователя {user_id} на споте {spot_id} с типом {checkin_type}")
+
+    # Валидация checkin_type
+    if checkin_type not in [1, 2]:
+        logger.error(f"Некорректный тип чек-ина: {checkin_type}")
+        return None
+
+    # Валидация arrival_time, если указано
+    if arrival_time:
+        try:
+            datetime.fromisoformat(arrival_time)
+        except ValueError:
+            logger.error(f"Некорректный формат arrival_time: {arrival_time}")
+            return None
+
     try:
+        # Деактивация всех текущих чек-инов пользователя
         await deactivate_all_checkins(user_id)
         user = await get_user(user_id)
         tz_name = user.get('timezone', 'UTC')
@@ -220,6 +250,7 @@ async def checkin_user(
         timestamp = datetime.now(pytz.utc)
         end_time = None
 
+        # Подключение к базе данных и вставка записи
         async with aiosqlite.connect(DB_PATH) as conn:
             cursor = await conn.cursor()
             await cursor.execute('''
@@ -232,33 +263,33 @@ async def checkin_user(
                 user_id,
                 spot_id,
                 timestamp.isoformat(),
-                0 if checkin_type == 1 else 1,  # Для типа 1 создаем неактивную запись
+                0 if checkin_type == 1 else 1,  # Тип 1: неактивен, Тип 2: активен
                 checkin_type,
                 duration_hours,
                 arrival_time,
                 end_time
             ))
             await conn.commit()
-            return cursor.lastrowid
+            checkin_id = cursor.lastrowid  # Получаем ID новой записи
+            
+            # Логирование успешного создания чек-ина
+            logger.info(f"Создан чек-ин {checkin_id} для пользователя {user_id} на споте {spot_id}")
+
+            # Отправка уведомлений для активных чек-инов (тип 2)
+            if bot and checkin_type == 2:
+                await notify_favorite_users(
+                    spot_id=spot_id,
+                    checkin_user_id=user_id,
+                    bot=bot,
+                    checkin_type=checkin_type,
+                    arrival_time=arrival_time
+                )
+
+            return checkin_id  # Возвращаем ID чек-ина
 
     except Exception as e:
-        logger.error(f"Ошибка создания чекина: {str(e)}")
-        return None
-
-        # Уведомления
-        if bot:
-            await notify_favorite_users(
-                spot_id=spot_id,
-                checkin_user_id=user_id,
-                bot=bot,
-                checkin_type=checkin_type,
-                arrival_time=arrival_time
-            )
-
-        return checkin_id  # Возвращаем ID
-
-    except Exception as e:
-        logger.error(f"Ошибка создания чекина: {str(e)}")
+        # Логирование ошибки
+        logger.error(f"Ошибка создания чек-ина: {str(e)}")
         return None
 
 async def get_active_checkin(user_id: int) -> dict:
@@ -430,7 +461,7 @@ async def notify_favorite_users(
                 await bot.send_message(chat_id=user_id, text=text)
                 logger.info(f"Уведомление отправлено пользователю {user_id}")
             except Exception as e:
-                logger.error(f"Ошибка отправки: {e}")
+                logger.error(f"Ошибка отправки уведомления пользователю {user_id}: {str(e)}")
     except Exception as e:
         logger.error(f"Ошибка в уведомлениях: {e}")
 
