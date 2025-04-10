@@ -18,4 +18,3 @@ pip-delete-this-directory.txt
 
 # Docker файлы, которые не нужны в Git
 *.pid
-"data/database.db" 
