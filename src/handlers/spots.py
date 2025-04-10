@@ -59,11 +59,9 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     user_lat = message.location.latitude
     user_lon = message.location.longitude
 
-    # Определяем часовой пояс
     timezone_name = tf.timezone_at(lat=user_lat, lng=user_lon) or "UTC"
     user_timezone = pytz.timezone(timezone_name)
 
-    # Обновляем данные пользователя
     user = await get_user(user_id)
     await add_or_update_user(
         user_id=user_id,
@@ -73,7 +71,6 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
         timezone=timezone_name
     )
 
-    # Получаем все споты
     spots = await get_spots() or []
     if not spots:
         await message.answer("❌ Похоже, в базе нет спотов.", reply_markup=ReplyKeyboardRemove())
@@ -82,21 +79,21 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
         await state.clear()
         return
 
-    # Фильтруем споты с активными чек-инами
     active_spots = []
     for spot in spots:
-        active_count, active_users, arriving_users = await get_checkins_for_spot(spot["id"])  # Распаковка трёх значений
-        if active_count > 0 or len(arriving_users) > 0:  # Исправлено условие
+        active_count, active_users, arriving_users = await get_checkins_for_spot(spot["id"])
+        if active_count > 0 or len(arriving_users) > 0:
             distance = haversine_distance(user_lat, user_lon, spot["lat"], spot["lon"])
             active_spots.append((spot, distance))
 
-    # Сортируем по расстоянию и берём до 5 ближайших
     nearest_active_spots = sorted(active_spots, key=lambda x: x[1])[:5]
 
     if not nearest_active_spots:
-        # Если нет активных спотов, показываем сообщение с шуткой
         await message.answer(
-            "🌬️🚫🔍 На спотах активность не обнаружена! 🚗📍🤔 Собрался или приехал на спот и решил остаться? 📢📍🤙 Дай знать — отметь себя на споте! 🌍👥🌪️🪁 Все будут знать, где сегодня вкатывают.",
+            "🌬️🚫🔍 На спотах активность не обнаружена!\n"
+            "🚗📍🤔 Собрался или приехал на спот и решил остаться?\n"
+            "📢📍🤙 Дай знать — отметь себя на споте!\n"
+            "🌍👥🌪️🪁 Все будут знать, где сегодня вкатывают.",
             reply_markup=ReplyKeyboardRemove()
         )
         keyboard = InlineKeyboardMarkup(
@@ -106,10 +103,9 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
         await state.clear()
         return
 
-    # Формируем ответ
     response = "🔍 **Активные споты:**\n\n"
     for spot, distance in nearest_active_spots:
-        active_count, active_users, arriving_users = await get_checkins_for_spot(spot["id"])  # Распаковка трёх значений
+        active_count, active_users, arriving_users = await get_checkins_for_spot(spot["id"])
         on_spot_names = ", ".join(user["first_name"] for user in active_users) if active_users else "никого"
 
         arriving_info = "нет"
@@ -117,23 +113,24 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
             arriving_info_list = []
             for user in arriving_users:
                 arrival_time_str = user["arrival_time"]
-                if "T" not in arrival_time_str:  # Для старых записей
+                if "T" not in arrival_time_str:
                     arrival_time_str = f"{datetime.utcnow().date()}T{arrival_time_str}+00:00"
                 utc_time = datetime.fromisoformat(arrival_time_str.replace("Z", "+00:00"))
                 local_time = utc_time.replace(tzinfo=pytz.utc).astimezone(user_timezone)
                 arriving_info_list.append(f"{user['first_name']} ({local_time.strftime('%H:%M')})")
             arriving_info = ", ".join(arriving_info_list)
 
-        # Получаем данные о ветре и температуре
         wind_data = await get_windy_forecast(spot["lat"], spot["lon"])
         wind_info = "🌬 *Ветер:* Данные недоступны."
         temp_info = "🌡 *Температура:* Данные недоступны."
         if wind_data:
             wind_speed = wind_data["speed"]
             wind_direction = wind_data["direction"]
+            wind_gusts = wind_data.get("gusts")  # Добавляем получение порывов
             direction_text = wind_direction_to_text(wind_direction)
             wind_info = f"🌬 *Ветер:* {wind_speed:.1f} м/с, {direction_text} ({wind_direction:.0f}°)"
-            # Добавляем температуру, если она доступна
+            if wind_gusts is not None:
+                wind_info += f", порывы до {wind_gusts:.1f} м/с"  # Добавляем порывы в вывод
             if "water_temperature" in wind_data and wind_data["water_temperature"] is not None:
                 temp_info = f"🌡 *Вода:* {wind_data['water_temperature']:.1f} °C"
 
@@ -146,7 +143,6 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
             f"⏳ *Приедут:* {len(arriving_users)} чел. ({arriving_info})\n\n"
         )
 
-    # Клавиатура
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=f"🏄‍♂️ Собираюсь на {spot['name']}", callback_data=f"plan_to_arrive_{spot['id']}")]

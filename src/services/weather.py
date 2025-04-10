@@ -8,47 +8,46 @@ logging.basicConfig(level=logging.INFO)
 @cached(ttl=600)
 async def get_open_meteo_forecast(lat: float, lon: float) -> dict:
     """
-    Получает текущие данные о ветре и температуру воды с Open‑Meteo.
+    Получает текущие данные о ветре, порывах ветра и температуре воды с Open‑Meteo.
     
     Используются два эндпоинта:
-      - Open‑Meteo API для получения текущего прогноза ветра с автоматическим определением часового пояса.
-      - Open‑Meteo Marine API для получения температуры поверхности моря.
+      - Open‑Meteo API для текущего прогноза ветра и порывов с автоматическим определением часового пояса.
+      - Open‑Meteo Marine API для температуры поверхности моря.
     
     Args:
         lat (float): Широта точки.
         lon (float): Долгота точки.
     
     Returns:
-        dict: Словарь с данными о ветре (скорость и направление) и температуре воды (°C).
+        dict: Словарь с данными о ветре (скорость, направление, порывы) и температуре воды (°C).
               Если данные недоступны, возвращается None.
     """
-    # Эндпоинт Open‑Meteo для текущего прогноза ветра (timezone=auto для определения местного времени)
-    url_wind = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true&windspeed_unit=ms&timezone=auto"
+    # Исправленный URL: все параметры в current
+    url_wind = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=windspeed_10m,winddirection_10m,windgusts_10m&windspeed_unit=ms&timezone=auto"
     
-    # Эндпоинт Open‑Meteo Marine API для температуры воды
     url_water = f"https://marine-api.open-meteo.com/v1/marine?latitude={lat}&longitude={lon}&hourly=sea_surface_temperature"
     
     try:
         async with aiohttp.ClientSession() as session:
-            # Запрос для получения текущих данных о ветре
             async with session.get(url_wind) as response_wind:
                 if response_wind.status != 200:
                     logging.error(f"Ошибка Open‑Meteo Wind API: {await response_wind.text()}")
                     return None
                 wind_data = await response_wind.json()
                 
-                if "current_weather" in wind_data:
-                    current = wind_data["current_weather"]
-                    wind_speed = current.get("windspeed")
-                    wind_direction = current.get("winddirection")
+                # Исправляем ключ на "current" вместо "current_weather"
+                if "current" in wind_data:
+                    current = wind_data["current"]
+                    wind_speed = current.get("windspeed_10m")
+                    wind_direction = current.get("winddirection_10m")
+                    wind_gusts = current.get("windgusts_10m")
                     if wind_speed is None or wind_direction is None:
-                        logging.error("Данные о ветре отсутствуют в current_weather")
+                        logging.error("Данные о ветре отсутствуют в current")
                         return None
                 else:
-                    logging.error("Отсутствует ключ 'current_weather' в ответе Open‑Meteo")
+                    logging.error("Отсутствует ключ 'current' в ответе Open‑Meteo")
                     return None
             
-            # Запрос для получения температуры воды
             async with session.get(url_water) as response_water:
                 if response_water.status != 200:
                     logging.error(f"Ошибка Open‑Meteo Marine API: {await response_water.text()}")
@@ -64,7 +63,8 @@ async def get_open_meteo_forecast(lat: float, lon: float) -> dict:
         return {
             "speed": wind_speed,
             "direction": wind_direction,
-            "water_temperature": water_temp  # None, если данные отсутствуют
+            "gusts": wind_gusts,
+            "water_temperature": water_temp
         }
     except Exception as e:
         logging.error(f"Ошибка при запросе: {e}")
