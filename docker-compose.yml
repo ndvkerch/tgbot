@@ -1,16 +1,11 @@
-version: '3.8'
-
 services:
   bot:
     build: .
     ports:
-      - "8000:8000"  # Порт, который "видит" Timeweb
+      - "30000:30000"  # <-- Пробрасываем новый порт
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}  # Переменная задается в настройках Timeweb
+      - BOT_TOKEN=${BOT_TOKEN}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:30000/health || exit 1"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-    command: ["python", "src/bot.py"]

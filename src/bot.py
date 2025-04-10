@@ -4,55 +4,62 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
-from database import init_db  # Импортируем init_db
+from aiohttp import web  # <-- Добавляем веб-сервер
 
-# Импортируем middleware
+# Импорты ваших модулей
+from database import init_db
 from middlewares import BotMiddleware
-
-# Импортируем обработчики команд
 from handlers.start import start_router
 from handlers.checkin import checkin_router
 from handlers.profile import profile_router
 from handlers.spots import spots_router
 from handlers.weather import weather_router
-
-# Импортируем планировщик задач
 from scheduler import start_scheduler
 
-# Блок 1: Настройка окружения и логирования
+# Настройки
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("BOT_TOKEN не найден! Проверь .env файл.")
 logging.basicConfig(level=logging.INFO)
 
-# Блок 2: Инициализация бота и диспетчера
+# Создаем веб-приложение для healthcheck
+async def healthcheck(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get("/health", healthcheck)
+
+# Инициализация бота
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot=bot, storage=storage)
 dp.message.middleware(BotMiddleware(bot))
 dp.callback_query.middleware(BotMiddleware(bot))
 
-# Блок 3: Подключение обработчиков
+# Подключаем роутеры
 dp.include_router(start_router)
 dp.include_router(checkin_router)
 dp.include_router(profile_router)
 dp.include_router(spots_router)
 dp.include_router(weather_router)
 
-# Блок 4: Основная функция запуска
 async def main():
-    """Основная функция для запуска бота."""
-    logging.info("Инициализация базы данных...")
-    await init_db()  # Асинхронный вызов init_db
+    # Инициализация БД
+    await init_db()
     
-    logging.info("Запуск планировщика задач...")
+    # Запуск планировщика
     start_scheduler(bot=bot)
     
-    logging.info("Запуск бота...")
+    # Создаем фоновую задачу для веб-сервера
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, port=30000)  # <-- Сервер на порту 30000
+    await site.start()
+    
+    # Запускаем бота
+    logging.info("Бот и веб-сервер запущены")
     await dp.start_polling(bot)
 
-# Блок 5: Точка входа
 if __name__ == "__main__":
-    """Точка входа для запуска бота."""
     asyncio.run(main())
