@@ -1,10 +1,16 @@
-version: "3.8"
+version: '3.8'
 
 services:
   bot:
     build: .
-    container_name: telegram_bot
+    ports:
+      - "8000:8000"  # Порт, который "видит" Timeweb
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}  # Переменная задается в настройках Timeweb
     restart: unless-stopped
-    env_file:
-      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     command: ["python", "src/bot.py"]
