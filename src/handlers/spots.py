@@ -5,18 +5,26 @@ from timezonefinder import TimezoneFinder
 import pytz
 
 from aiogram import Router, types, F, Bot
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database import get_spots, get_spot_by_id, get_active_checkin, get_checkins_for_spot, checkin_user, get_user, add_or_update_user
 from services.weather import get_open_meteo_forecast as get_windy_forecast, wind_direction_to_text
+from keyboards import (
+    create_location_request_keyboard,
+    create_back_to_menu_keyboard,
+    create_nearby_spots_keyboard,
+    create_arrival_time_keyboard,
+    create_confirm_arrival_keyboard,
+)
+from .checkin import CheckinState  # Импортируем CheckinState
 
 logging.basicConfig(level=logging.INFO)
 spots_router = Router()
 
 class NearbySpotsState(StatesGroup):
     waiting_for_location = State()
-    setting_arrival_time = State()
+    # setting_arrival_time больше не нужно, используем CheckinState.setting_arrival_time
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Вычисляет расстояние между двумя точками на Земле (в километрах) с помощью формулы гаверсинуса."""
@@ -28,25 +36,12 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     c = 2 * math.asin(math.sqrt(a))
     return R * c
 
-def create_arrival_time_keyboard() -> InlineKeyboardMarkup:
-    """Создаёт клавиатуру для выбора времени прибытия."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Через 1 час", callback_data="arrival_1"),
-         InlineKeyboardButton(text="Через 2 часа", callback_data="arrival_2"),
-         InlineKeyboardButton(text="Через 3 часа", callback_data="arrival_3")],
-        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="cancel_checkin")]
-    ])
-
 tf = TimezoneFinder()
 
 @spots_router.callback_query(F.data == "nearby_spots")
 async def request_location_for_nearby_spots(callback: types.CallbackQuery, state: FSMContext):
     """Запрашиваем геолокацию для поиска ближайших спотов."""
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📍 Отправить геолокацию", request_location=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
+    keyboard = create_location_request_keyboard()
     await callback.message.edit_text("📍 Отправьте вашу геолокацию, чтобы найти ближайшие споты:")
     await callback.message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
     await state.set_state(NearbySpotsState.waiting_for_location)
@@ -74,7 +69,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
     spots = await get_spots() or []
     if not spots:
         await message.answer("❌ Похоже, в базе нет спотов.", reply_markup=ReplyKeyboardRemove())
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]])
+        keyboard = create_back_to_menu_keyboard()
         await message.answer("Вернитесь в меню:", reply_markup=keyboard)
         await state.clear()
         return
@@ -96,9 +91,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
             "🌍👥🌪️🪁 Все будут знать, где сегодня вкатывают.",
             reply_markup=ReplyKeyboardRemove()
         )
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]]
-        )
+        keyboard = create_back_to_menu_keyboard()
         await message.answer("Вернитесь в меню:", reply_markup=keyboard)
         await state.clear()
         return
@@ -126,11 +119,11 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
         if wind_data:
             wind_speed = wind_data["speed"]
             wind_direction = wind_data["direction"]
-            wind_gusts = wind_data.get("gusts")  # Добавляем получение порывов
+            wind_gusts = wind_data.get("gusts")
             direction_text = wind_direction_to_text(wind_direction)
             wind_info = f"🌬 *Ветер:* {wind_speed:.1f} м/с, {direction_text} ({wind_direction:.0f}°)"
             if wind_gusts is not None:
-                wind_info += f", порывы до {wind_gusts:.1f} м/с"  # Добавляем порывы в вывод
+                wind_info += f", порывы до {wind_gusts:.1f} м/с"
             if "water_temperature" in wind_data and wind_data["water_temperature"] is not None:
                 temp_info = f"🌡 *Вода:* {wind_data['water_temperature']:.1f} °C"
 
@@ -143,13 +136,7 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
             f"⏳ *Приедут:* {len(arriving_users)} чел. ({arriving_info})\n\n"
         )
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=f"🏄‍♂️ Собираюсь на {spot['name']}", callback_data=f"plan_to_arrive_{spot['id']}")]
-            for spot, distance in nearest_active_spots
-        ] + [[InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]]
-    )
-
+    keyboard = create_nearby_spots_keyboard(nearest_active_spots)
     await message.answer(response, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     await message.answer("Выберите действие:", reply_markup=keyboard)
     await state.clear()
@@ -158,31 +145,10 @@ async def process_location_for_nearby_spots(message: types.Message, state: FSMCo
 async def handle_invalid_location_for_nearby_spots(message: types.Message, state: FSMContext):
     """Обрабатываем случай, если пользователь отправил не геолокацию."""
     await message.answer("❌ Пожалуйста, отправьте геолокацию, нажав на кнопку '📍 Отправить геолокацию'.")
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📍 Отправить геолокацию", request_location=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
+    keyboard = create_location_request_keyboard()
     await message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
 
-@spots_router.callback_query(F.data.startswith("plan_to_arrive_"))
-async def plan_to_arrive(callback: types.CallbackQuery, state: FSMContext):
-    """Запрашиваем время прибытия после выбора спота."""
-    spot_id = int(callback.data.split("_")[-1])
-    spot = await get_spot_by_id(spot_id)
-    if not spot:
-        await callback.message.answer("❌ Спот не найден.")
-        await callback.answer()
-        return
-
-    await state.update_data(spot_id=spot_id)
-    await callback.message.edit_text(f"Вы выбрали спот: {spot['name']}\nКогда вы планируете приехать?")
-    keyboard = create_arrival_time_keyboard()
-    await callback.message.answer("Выберите время прибытия:", reply_markup=keyboard)
-    await state.set_state(NearbySpotsState.setting_arrival_time)
-    await callback.answer()
-
-@spots_router.callback_query(F.data.startswith("arrival_"), NearbySpotsState.setting_arrival_time)
+@spots_router.callback_query(F.data.startswith("arrival_"), CheckinState.setting_arrival_time)
 async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     """Обрабатываем время прибытия и регистрируем чек-ин."""
     arrival_str = callback.data.split("_")[1]
@@ -213,28 +179,20 @@ async def process_arrival_time(callback: types.CallbackQuery, state: FSMContext,
     spot_id = data["spot_id"]
     user_id = callback.from_user.id
 
-    # Удаляем параметр bot=bot из вызова функции checkin_user
     await checkin_user(user_id, spot_id, checkin_type=2, arrival_time=arrival_time)
     spot = await get_spot_by_id(spot_id)
     await callback.message.edit_text(f"✅ Вы запланировали приезд на спот '{spot['name']}'! 🌊")
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Я приехал!", callback_data="confirm_arrival")],
-            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
-        ]
-    )
+    keyboard = create_confirm_arrival_keyboard()
     await callback.message.answer("Когда приедете, подтвердите прибытие:", reply_markup=keyboard)
     await state.clear()
     await callback.answer()
 
-@spots_router.callback_query(F.data == "cancel_checkin", NearbySpotsState.setting_arrival_time)
+@spots_router.callback_query(F.data == "cancel_checkin", CheckinState.setting_arrival_time)
 async def cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
     """Отмена планирования приезда."""
     await callback.message.edit_text("❌ Планирование приезда отменено.")
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]]
-    )
+    keyboard = create_back_to_menu_keyboard()
     await callback.message.answer("Вернитесь в меню:", reply_markup=keyboard)
     await state.clear()
     await callback.answer()
