@@ -1,65 +1,60 @@
+# weather.py
 import logging
-import math
 from datetime import datetime, timedelta
 from timezonefinder import TimezoneFinder
 import pytz
+from typing import Tuple
 
 from aiogram import Router, types, F
-from aiogram.types import ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database import get_spots, get_spot_by_id, get_checkins_for_spot, checkin_user
 from services.weather import get_open_meteo_forecast as get_windy_forecast, wind_direction_to_text
-from keyboards import (
-    create_location_request_keyboard,
-    create_back_to_menu_keyboard,
-    create_weather_spots_keyboard,
-    create_arrival_time_keyboard,
-    create_confirm_arrival_keyboard,
-)
-from .checkin import CheckinState  # Импортируем CheckinState
+from utils.geo import request_user_location, haversine_distance, GeoState
+from keyboards import create_location_request_keyboard
 
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 weather_router = Router()
-
-class WeatherSpotsState(StatesGroup):
-    waiting_for_location = State()
-    # setting_arrival_time больше не нужно, используем CheckinState.setting_arrival_time
-
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Вычисляет расстояние между двумя точками на Земле (в километрах)."""
-    R = 6371
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    c = 2 * math.asin(math.sqrt(a))
-    return R * c
 
 tf = TimezoneFinder()
 
+def create_arrival_time_keyboard() -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру для выбора времени прибытия."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Через 1 час", callback_data="arrival_1"),
+         InlineKeyboardButton(text="Через 2 часа", callback_data="arrival_2"),
+         InlineKeyboardButton(text="Через 3 часа", callback_data="arrival_3")],
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="cancel_checkin")]
+    ])
+
+class WeatherSpotsState(StatesGroup):
+    setting_arrival_time = State()
+
 @weather_router.callback_query(F.data == "weather_nearby_spots")
 async def request_location_for_weather_spots(callback: types.CallbackQuery, state: FSMContext):
-    """Запрашиваем геолокацию для поиска ближайших спотов."""
-    keyboard = create_location_request_keyboard()
+    user_id = callback.from_user.id
+    cached_location = await get_cached_location(user_id)
+    if cached_location:
+        logger.info(f"Используется кэш для weather_nearby_spots user_id={user_id}: {cached_location}")
+        await process_location_for_weather_spots_manual(callback.message, state, cached_location)
+        await callback.answer()
+        return
     await callback.message.edit_text("📍 Отправьте вашу геолокацию, чтобы узнать погоду на ближайших спотах:")
-    await callback.message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
-    await state.set_state(WeatherSpotsState.waiting_for_location)
+    await callback.message.answer("Нажмите кнопку ниже:", reply_markup=create_location_request_keyboard())
+    await state.set_state(GeoState.waiting_for_weather_location)
     await callback.answer()
 
-@weather_router.message(WeatherSpotsState.waiting_for_location, F.location)
-async def process_location_for_weather_spots(message: types.Message, state: FSMContext):
-    """Обрабатываем геолокацию и показываем 5 ближайших спотов с погодой."""
-    user_lat = message.location.latitude
-    user_lon = message.location.longitude
-
+@weather_router.message(GeoState.waiting_for_weather_location, F.location)
+async def process_location_for_weather_spots_manual(message: types.Message, state: FSMContext, location: Tuple[float, float]):
+    user_lat, user_lon = location
     timezone_name = tf.timezone_at(lat=user_lat, lng=user_lon) or "UTC"
     user_timezone = pytz.timezone(timezone_name)
 
     spots = await get_spots() or []
     if not spots:
         await message.answer("❌ Похоже, в базе нет спотов.", reply_markup=ReplyKeyboardRemove())
-        keyboard = create_back_to_menu_keyboard()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]])
         await message.answer("Вернитесь в меню:", reply_markup=keyboard)
         await state.clear()
         return
@@ -107,19 +102,35 @@ async def process_location_for_weather_spots(message: types.Message, state: FSMC
             f"⏳ *Приедут:* {len(arriving_users)} чел. ({arriving_info})\n\n"
         )
 
-    keyboard = create_weather_spots_keyboard(nearest_spots)
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"🏄‍♂️ Собираюсь на {spot['name']}", callback_data=f"weather_plan_to_arrive_{spot['id']}")]
+            for spot, distance in nearest_spots
+        ] + [[InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]]
+    )
+
     await message.answer(response, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     await message.answer("Выберите действие:", reply_markup=keyboard)
     await state.clear()
 
-@weather_router.message(WeatherSpotsState.waiting_for_location)
-async def handle_invalid_location_for_weather_spots(message: types.Message, state: FSMContext):
-    """Обрабатываем случай, если пользователь отправил не геолокацию."""
-    await message.answer("❌ Пожалуйста, отправьте геолокацию, нажав на кнопку '📍 Отправить геолокацию'.")
-    keyboard = create_location_request_keyboard()
-    await message.answer("Нажмите кнопку ниже:", reply_markup=keyboard)
+@weather_router.callback_query(F.data.startswith("weather_plan_to_arrive_"))
+async def weather_plan_to_arrive(callback: types.CallbackQuery, state: FSMContext):
+    """Запрашиваем время прибытия после выбора спота в weather_router."""
+    spot_id = int(callback.data.split("_")[-1])
+    spot = await get_spot_by_id(spot_id)
+    if not spot:
+        await callback.message.answer("❌ Спот не найден.")
+        await callback.answer()
+        return
 
-@weather_router.callback_query(F.data.startswith("arrival_"), CheckinState.setting_arrival_time)
+    await state.update_data(spot_id=spot_id)
+    await callback.message.edit_text(f"Вы выбрали спот: {spot['name']}\nКогда вы планируете приехать?")
+    keyboard = create_arrival_time_keyboard()
+    await callback.message.answer("Выберите время прибытия:", reply_markup=keyboard)
+    await state.set_state(WeatherSpotsState.setting_arrival_time)
+    await callback.answer()
+
+@weather_router.callback_query(F.data.startswith("arrival_"), WeatherSpotsState.setting_arrival_time)
 async def weather_process_arrival_time(callback: types.CallbackQuery, state: FSMContext):
     """Обрабатываем время прибытия и регистрируем чек-ин в weather_router."""
     arrival_str = callback.data.split("_")[1]
@@ -139,16 +150,22 @@ async def weather_process_arrival_time(callback: types.CallbackQuery, state: FSM
     spot = await get_spot_by_id(spot_id)
     await callback.message.edit_text(f"✅ Вы запланировали приезд на спот '{spot['name']}'! 🌊")
 
-    keyboard = create_confirm_arrival_keyboard()
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Я приехал!", callback_data="confirm_arrival")],
+            [InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]
+        ]
+    )
     await callback.message.answer("Когда приедете, подтвердите прибытие:", reply_markup=keyboard)
     await state.clear()
     await callback.answer()
 
-@weather_router.callback_query(F.data == "cancel_checkin", CheckinState.setting_arrival_time)
+@weather_router.callback_query(F.data == "cancel_checkin", WeatherSpotsState.setting_arrival_time)
 async def weather_cancel_checkin(callback: types.CallbackQuery, state: FSMContext):
     """Отмена планирования приезда в weather_router."""
     await callback.message.edit_text("❌ Планирование приезда отменено.")
-    keyboard = create_back_to_menu_keyboard()
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="back_to_menu")]])
     await callback.message.answer("Вернитесь в меню:", reply_markup=keyboard)
     await state.clear()
     await callback.answer()

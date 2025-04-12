@@ -24,7 +24,6 @@ async def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📍 Отметиться на споте", callback_data="checkin")],
         [InlineKeyboardButton(text="👤 Профиль", callback_data="profile")]
     ]
-
     # Проверяем, есть ли активный чек-ин
     active_checkin = await get_active_checkin(user_id)
     if active_checkin:
@@ -34,13 +33,11 @@ async def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
         elif active_checkin["checkin_type"] == 2:
             # Если пользователь запланировал приезд
             buttons.append([InlineKeyboardButton(text="✅ Я приехал", callback_data="confirm_arrival")])
-
-    # Проверяем, есть ли споты в базе, и добавляем кнопки
+    # Проверяем, есть ли споты в базе, и добавляем кнопки        
     spots = await get_spots()
     if spots:
-        buttons.append([InlineKeyboardButton(text="🔍 Кто на спотах", callback_data="nearby_spots")])
-        buttons.append([InlineKeyboardButton(text="🌤️ Ближайшие споты", callback_data="weather_nearby_spots")])
-
+        buttons.append([InlineKeyboardButton(text="🔍 Кто на спотах", callback_data="active_spots")])
+        buttons.append([InlineKeyboardButton(text="🌤️ Ближайшие споты", callback_data="nearby_spots")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     logger.debug(f"Создана главная клавиатура для пользователя {user_id}: {buttons}")
     return keyboard
