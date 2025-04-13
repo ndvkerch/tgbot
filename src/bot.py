@@ -11,12 +11,12 @@ from dotenv import load_dotenv
 from database import init_db
 from middlewares import BotMiddleware
 from handlers.start import start_router
-from handlers.checkin import checkin_router
+from handlers.checkin import checkin_router, CheckinState  # Добавлен импорт CheckinState
 from handlers.profile import profile_router
 from handlers.spots import spots_router
 from handlers.weather import weather_router
 from scheduler import start_scheduler, scheduler
-from utils.geo import GeoState  # Добавлен импорт GeoState
+from utils.geo import GeoState
 
 # Настройки
 load_dotenv()
@@ -50,10 +50,15 @@ dp.include_router(weather_router)
 async def ignore_bot_events(event):
     logger.debug(f"Игнорируем событие от бота: {event}")
 
-# Игнорируем геолокацию вне состояний
-@dp.message(F.location, ~StateFilter(GeoState.waiting_for_spots_location, GeoState.waiting_for_weather_location))
+# Игнорируем геолокацию вне разрешённых состояний
+@dp.message(F.location, ~StateFilter(
+    GeoState.waiting_for_spots_location,
+    GeoState.waiting_for_weather_location,
+    CheckinState.adding_spot,  # Добавлено состояние
+    CheckinState.editing_location  # Для редактирования спотов
+))
 async def handle_global_location(message: types.Message):
-    logger.debug(f"Игнорируем геолокацию вне состояний для user_id={message.from_user.id}")
+    logger.debug(f"Игнорируем геолокацию вне разрешённых состояний для user_id={message.from_user.id}")
 
 async def main():
     # Инициализация БД
